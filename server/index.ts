@@ -7,6 +7,13 @@ import { createRealtimeSession } from "./realtime";
 import { createVoicePreview } from "./voicePreview";
 import { createConversation, listConversations } from "./store";
 import { resolveDirectory, resolveFileInsideDirectory } from "./pathUtils";
+import {
+  generateQuizQuestions,
+  gradeQuizAnswer,
+  normalizeQuestionCount,
+  normalizeQuizDifficulty,
+  proposeQuizComponents
+} from "./quiz";
 import type { CodexReasoningEffort } from "./types";
 
 const app = express();
@@ -97,6 +104,73 @@ app.post("/api/conversations", async (req, res, next) => {
   }
 });
 
+app.post("/api/quiz/components", async (req, res, next) => {
+  try {
+    const targetPath = await resolveDirectory(String(req.body?.targetPath ?? ""));
+    const result = await proposeQuizComponents({
+      conversationId:
+        typeof req.body?.conversationId === "string" ? req.body.conversationId : undefined,
+      targetPath,
+      reasoningEffort: parseReasoningEffort(req.body?.reasoningEffort)
+    });
+
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/quiz/questions", async (req, res, next) => {
+  try {
+    const targetPath = await resolveDirectory(String(req.body?.targetPath ?? ""));
+    const component = readQuizComponent(req.body?.component);
+
+    if (!component) {
+      res.status(400).json({ ok: false, error: "Missing quiz component." });
+      return;
+    }
+
+    const result = await generateQuizQuestions({
+      conversationId:
+        typeof req.body?.conversationId === "string" ? req.body.conversationId : undefined,
+      targetPath,
+      component,
+      difficulty: normalizeQuizDifficulty(req.body?.difficulty),
+      count: normalizeQuestionCount(req.body?.count),
+      reasoningEffort: parseReasoningEffort(req.body?.reasoningEffort)
+    });
+
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/quiz/grade", async (req, res, next) => {
+  try {
+    const targetPath = await resolveDirectory(String(req.body?.targetPath ?? ""));
+    const question = readQuizQuestion(req.body?.question);
+
+    if (!question) {
+      res.status(400).json({ ok: false, error: "Missing quiz question." });
+      return;
+    }
+
+    const result = await gradeQuizAnswer({
+      conversationId:
+        typeof req.body?.conversationId === "string" ? req.body.conversationId : undefined,
+      targetPath,
+      question,
+      answer: String(req.body?.answer ?? ""),
+      reasoningEffort: parseReasoningEffort(req.body?.reasoningEffort)
+    });
+
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/codex/ask", async (req, res, next) => {
   try {
     const result = await askCodex({
@@ -169,4 +243,67 @@ function parseReasoningEffort(value: unknown): CodexReasoningEffort | undefined 
   }
 
   return undefined;
+}
+
+function readQuizComponent(value: unknown): {
+  id: string;
+  title: string;
+  description: string;
+} | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const object = value as Record<string, unknown>;
+  const title = typeof object.title === "string" ? object.title.trim() : "";
+
+  if (!title) {
+    return undefined;
+  }
+
+  return {
+    id: typeof object.id === "string" && object.id.trim() ? object.id.trim() : "component",
+    title,
+    description:
+      typeof object.description === "string" && object.description.trim()
+        ? object.description.trim()
+        : "Codebase component"
+  };
+}
+
+function readQuizQuestion(value: unknown): {
+  id: string;
+  question: string;
+  expectedAnswer: string;
+  evidenceMarkdown: string;
+  componentTitle: string;
+  difficulty: "easy" | "medium" | "hard";
+} | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const object = value as Record<string, unknown>;
+  const question = typeof object.question === "string" ? object.question.trim() : "";
+  const expectedAnswer =
+    typeof object.expectedAnswer === "string" ? object.expectedAnswer.trim() : "";
+
+  if (!question || !expectedAnswer) {
+    return undefined;
+  }
+
+  return {
+    id: typeof object.id === "string" && object.id.trim() ? object.id.trim() : "question",
+    question,
+    expectedAnswer,
+    evidenceMarkdown:
+      typeof object.evidenceMarkdown === "string" && object.evidenceMarkdown.trim()
+        ? object.evidenceMarkdown.trim()
+        : "No evidence was provided.",
+    componentTitle:
+      typeof object.componentTitle === "string" && object.componentTitle.trim()
+        ? object.componentTitle.trim()
+        : "Codebase",
+    difficulty: normalizeQuizDifficulty(object.difficulty)
+  };
 }

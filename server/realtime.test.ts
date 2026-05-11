@@ -16,9 +16,13 @@ describe("buildRealtimeSessionConfig", () => {
 
     expect(instructions).toContain("Voice speed: very fast");
     expect(instructions).toContain("Answer in one sentence.");
+    expect(instructions).toContain(
+      'Example: say "Let me check that", not "Let me check that quickly so I can give you the exact folder name."'
+    );
     expect(instructions).toContain("Do not say file names, paths, or line numbers aloud.");
     expect(instructions).toContain("Codex reasoning amount selected by the user: high");
     expect(config.audio).toEqual({ output: { voice: "cedar" } });
+    expect(JSON.stringify(config.tools)).toContain("grade_quiz_answer");
   });
 
   it("falls back to very fast voice speed and marin voice", () => {

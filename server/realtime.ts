@@ -184,8 +184,11 @@ export function buildRealtimeSessionConfig(input: {
     "You are a live voice codebase Q&A assistant.",
     getVoiceSpeedInstruction(voiceSpeed),
     "Use simple English. Be concise and direct.",
+    'Keep spoken filler short. Example: say "Let me check that", not "Let me check that quickly so I can give you the exact folder name."',
     "For codebase-specific claims, call the ask_codex tool before answering.",
     "When Codex returns evidence, explain the result in simple engineering language.",
+    "When the app sends quiz instructions, ask the exact quiz question aloud. After the user answers, call grade_quiz_answer with the question id and the user's answer. Do not grade quiz answers yourself before that tool returns.",
+    "After grade_quiz_answer returns, say the status and grade in simple English.",
     "Do not say file names, paths, or line numbers aloud.",
     "Keep exact file and line references in the visible Codex output only.",
     "If the user asks where the evidence is, say that the exact references are in the transcript.",
@@ -230,6 +233,27 @@ export function buildRealtimeSessionConfig(input: {
             }
           },
           required: ["question"]
+        }
+      },
+      {
+        type: "function",
+        name: "grade_quiz_answer",
+        description:
+          "Grade a spoken answer for the active codebase quiz question. The app has the expected answer and code evidence.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            question_id: {
+              type: "string",
+              description: "The quiz question id provided by the app."
+            },
+            answer: {
+              type: "string",
+              description: "The user's spoken answer transcript."
+            }
+          },
+          required: ["question_id", "answer"]
         }
       }
     ],
