@@ -1,8 +1,17 @@
 import crypto from "node:crypto";
 import os from "node:os";
 import type { Request, Response } from "express";
-import type { ReviewMode } from "./types";
-import { getModeGuidance } from "./prompts";
+
+type VoiceSpeed = "slow" | "normal" | "fast" | "very-fast";
+
+interface RealtimeSessionInput {
+  sdp: string;
+  targetPath: string;
+  conversationId: string;
+  reasoningEffort: string;
+  voiceSpeed: VoiceSpeed;
+  voiceSystemPrompt: string;
+}
 
 function getRealtimeModel(): string {
   return process.env.REALTIME_MODEL || "gpt-realtime-2";
@@ -27,12 +36,61 @@ function readHeader(value: string | string[] | undefined): string | undefined {
   return value;
 }
 
-function readMode(value: string | undefined): ReviewMode {
-  if (value === "bug" || value === "architecture") {
+function readBodyString(body: unknown, key: string): string | undefined {
+  if (!body || typeof body !== "object" || Buffer.isBuffer(body)) {
+    return undefined;
+  }
+
+  const value = (body as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function normalizeVoiceSpeed(value: string | undefined): VoiceSpeed {
+  if (value === "slow" || value === "normal" || value === "fast" || value === "very-fast") {
     return value;
   }
 
-  return "security";
+  return "fast";
+}
+
+function getVoiceSpeedInstruction(speed: VoiceSpeed): string {
+  if (speed === "slow") {
+    return "Voice speed: slow. Speak clearly and leave short pauses between ideas.";
+  }
+
+  if (speed === "normal") {
+    return "Voice speed: normal. Speak at a natural conversation pace.";
+  }
+
+  if (speed === "very-fast") {
+    return "Voice speed: very fast. Speak as quickly as you can while staying understandable.";
+  }
+
+  return "Voice speed: fast. Speak faster than normal while staying understandable.";
+}
+
+function readRealtimeSessionInput(req: Request): RealtimeSessionInput {
+  const body = req.body as unknown;
+  const sdp = typeof body === "string" ? body : readBodyString(body, "sdp") ?? "";
+  const targetPath = readBodyString(body, "targetPath") ?? readHeader(req.headers["x-target-path"]) ?? "";
+  const conversationId =
+    readBodyString(body, "conversationId") ?? readHeader(req.headers["x-conversation-id"]) ?? "";
+  const reasoningEffort =
+    readBodyString(body, "reasoningEffort") ?? readHeader(req.headers["x-codex-reasoning"]) ?? "medium";
+  const voiceSpeed = normalizeVoiceSpeed(
+    readBodyString(body, "voiceSpeed") ?? readHeader(req.headers["x-voice-speed"])
+  );
+  const voiceSystemPrompt =
+    readBodyString(body, "voiceSystemPrompt") ?? readHeader(req.headers["x-voice-system-prompt"]) ?? "";
+
+  return {
+    sdp,
+    targetPath,
+    conversationId,
+    reasoningEffort,
+    voiceSpeed,
+    voiceSystemPrompt
+  };
 }
 
 export async function createRealtimeSession(req: Request, res: Response): Promise<void> {
@@ -43,19 +101,16 @@ export async function createRealtimeSession(req: Request, res: Response): Promis
     return;
   }
 
-  const sdp = typeof req.body === "string" ? req.body : "";
+  const input = readRealtimeSessionInput(req);
 
-  if (!sdp.trim()) {
+  if (!input.sdp.trim()) {
     res.status(400).send("Missing SDP offer body.");
     return;
   }
 
-  const targetPath = readHeader(req.headers["x-target-path"]) ?? "";
-  const conversationId = readHeader(req.headers["x-conversation-id"]) ?? "";
-  const mode = readMode(readHeader(req.headers["x-review-mode"]));
-  const session = buildRealtimeSessionConfig({ targetPath, conversationId, mode });
+  const session = buildRealtimeSessionConfig(input);
   const formData = new FormData();
-  formData.set("sdp", sdp);
+  formData.set("sdp", input.sdp);
   formData.set("session", JSON.stringify(session));
 
   const response = await fetch("https://api.openai.com/v1/realtime/calls", {
@@ -80,22 +135,34 @@ export async function createRealtimeSession(req: Request, res: Response): Promis
 export function buildRealtimeSessionConfig(input: {
   targetPath: string;
   conversationId: string;
-  mode: ReviewMode;
+  reasoningEffort: string;
+  voiceSpeed?: string;
+  voiceSystemPrompt?: string;
 }): Record<string, unknown> {
+  const voiceSpeed = normalizeVoiceSpeed(input.voiceSpeed);
+  const customPrompt = input.voiceSystemPrompt?.trim();
+  const instructions = [
+    "You are a live voice codebase Q&A assistant.",
+    getVoiceSpeedInstruction(voiceSpeed),
+    "Use simple English. Be concise and direct.",
+    "For codebase-specific claims, call the ask_codex tool before answering.",
+    "When Codex returns evidence, explain the result in simple engineering language.",
+    "Do not say file names, paths, or line numbers aloud.",
+    "Keep exact file and line references in the visible Codex output only.",
+    "If the user asks where the evidence is, say that the exact references are in the transcript.",
+    `Current target path: ${input.targetPath || "not selected"}`,
+    `Current conversation id: ${input.conversationId || "not created yet"}`,
+    `Codex reasoning amount selected by the user: ${input.reasoningEffort}`
+  ];
+
+  if (customPrompt) {
+    instructions.push(`Extra voice system prompt from the user:\n${customPrompt}`);
+  }
+
   return {
     type: "realtime",
     model: getRealtimeModel(),
-    instructions: [
-      "You are a live voice code-review assistant.",
-      "The user is speaking. Keep spoken answers concise.",
-      "For codebase-specific claims, call the ask_codex tool before answering.",
-      "When Codex returns evidence, explain the result in simple engineering language.",
-      "Preserve file and line references in the text transcript when present.",
-      `Current target path: ${input.targetPath || "not selected"}`,
-      `Current conversation id: ${input.conversationId || "not created yet"}`,
-      `Current review mode: ${input.mode}`,
-      getModeGuidance(input.mode)
-    ].join("\n"),
+    instructions: instructions.join("\n"),
     reasoning: {
       effort: process.env.REALTIME_REASONING_EFFORT || "low"
     },
@@ -109,18 +176,14 @@ export function buildRealtimeSessionConfig(input: {
         type: "function",
         name: "ask_codex",
         description:
-          "Ask local Codex to inspect the selected codebase and answer a review question with file and line references.",
+          "Ask local Codex to inspect the selected codebase and answer a codebase question with file and line references.",
         parameters: {
           type: "object",
           additionalProperties: false,
           properties: {
             question: {
               type: "string",
-              description: "The code-review question to investigate."
-            },
-            mode: {
-              type: "string",
-              enum: ["security", "bug", "architecture"]
+              description: "The codebase question to investigate."
             },
             conversation_id: {
               type: "string",
@@ -134,4 +197,3 @@ export function buildRealtimeSessionConfig(input: {
     tool_choice: "auto"
   };
 }
-

@@ -20,6 +20,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -147,6 +148,7 @@ h2 {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid #cfc8bc;
@@ -156,7 +158,8 @@ textarea {
   outline: none;
 }
 
-input {
+input,
+select {
   height: 42px;
   padding: 0 12px;
 }
@@ -169,6 +172,7 @@ textarea {
 }
 
 input:focus,
+select:focus,
 textarea:focus {
   border-color: #1f6f60;
   box-shadow: 0 0 0 3px rgba(31, 111, 96, 0.14);
@@ -305,7 +309,6 @@ textarea:focus {
   background: #f1fbf7;
 }
 
-.message.tool,
 .message.status {
   border-color: #d4c7a5;
   background: #fff9e8;
@@ -397,4 +400,3 @@ textarea:focus {
     width: 100%;
   }
 }
-

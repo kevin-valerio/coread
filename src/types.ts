@@ -1,11 +1,11 @@
-export type ReviewMode = "security" | "bug" | "architecture";
+export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface ConversationRecord {
   id: string;
   title: string;
   token: string;
   targetPath: string;
-  mode: ReviewMode;
+  reasoningEffort?: CodexReasoningEffort;
   codexSessionId?: string;
   turns: number;
   createdAt: string;
@@ -22,7 +22,7 @@ export interface CodexAnswer {
 
 export interface TranscriptItem {
   id: string;
-  role: "user" | "assistant" | "tool" | "status" | "error";
+  role: "user" | "assistant" | "status" | "error";
   text: string;
   createdAt: string;
   streaming?: boolean;

@@ -6,14 +6,14 @@ This document describes the first local version of Realtime Codex Reviewer.
 
 Build a local app where a user can ask voice questions about a codebase and get a real-time spoken answer backed by Codex investigation.
 
-The app must support follow-up questions inside one review conversation. A single codebase can have many conversations, usually one conversation per review topic.
+The app must support follow-up questions inside one conversation. A single codebase can have many conversations, usually one conversation per topic.
 
 ## Main Flow
 
 1. The user starts the local web app.
 2. The user enters a local codebase path.
 3. The local server validates that the path exists and is a directory.
-4. The user chooses a review mode: security, bug, or architecture.
+4. The user chooses Codex reasoning amount, voice speed, and optional voice instructions.
 5. The user starts voice.
 6. The browser opens a WebRTC session to `gpt-realtime-2` through the local server.
 7. The user asks a question by microphone.
@@ -30,14 +30,18 @@ The app must support follow-up questions inside one review conversation. A singl
 For the first question in a conversation, the server runs:
 
 ```bash
-codex exec --json --skip-git-repo-check --sandbox read-only -C <codebase> -o <output-file> -
+codex exec --json --skip-git-repo-check --sandbox read-only -c model_reasoning_effort="<effort>" -C <codebase> -o <output-file> -
 ```
 
 For later questions in the same conversation, the server runs:
 
 ```bash
-codex exec resume <session-id> --json -o <output-file> -
+codex exec resume <session-id> --json -c sandbox_mode="read-only" -c model_reasoning_effort="<effort>" -o <output-file> -
 ```
+
+Both commands include a `model_reasoning_effort` config override from the UI.
+
+See `docs/codex-bridge-investigation.md` for the current bridge tradeoff. `codex exec resume` works, but app-server is the better long-term bridge for lower-latency voice sessions.
 
 The app stores the Codex session id in `.data/conversations.json`.
 
@@ -50,10 +54,23 @@ The browser never receives the OpenAI API key.
 The browser creates a WebRTC offer and sends the SDP to:
 
 ```text
-POST /api/realtime/session
+POST /api/realtime/session/json
 ```
 
-The local server forwards that SDP to the OpenAI Realtime API with a session config:
+The local server receives the SDP plus local session settings:
+
+```json
+{
+  "sdp": "v=0...",
+  "targetPath": "/Users/example/project",
+  "conversationId": "local-conversation-id",
+  "reasoningEffort": "medium",
+  "voiceSpeed": "fast",
+  "voiceSystemPrompt": "Answer in very short bullets."
+}
+```
+
+The local server forwards the SDP to the OpenAI Realtime API with a session config:
 
 ```json
 {
@@ -70,6 +87,10 @@ The local server forwards that SDP to the OpenAI Realtime API with a session con
 
 The local server returns the SDP answer to the browser.
 
+Voice speed is currently implemented as Realtime instruction text because the checked public Realtime WebRTC docs do not expose a stable speech-speed field for this session shape.
+
+The voice is instructed not to say file names, paths, or line numbers aloud. Exact references stay in the visible Codex output.
+
 ## Codex Tool Contract
 
 Tool name:
@@ -83,10 +104,11 @@ Arguments:
 ```json
 {
   "question": "Where can this parser panic?",
-  "mode": "security",
   "conversation_id": "local-conversation-id"
 }
 ```
+
+The browser also sends the selected Codex reasoning amount to the local server request.
 
 Result:
 
@@ -98,14 +120,6 @@ Result:
   "durationMs": 12345
 }
 ```
-
-## Review Modes
-
-Security review asks Codex to prioritize exploitable behavior, trust boundaries, unsafe parsing, injection, authz/authn issues, secret handling, command execution, path traversal, crypto misuse, concurrency hazards, and missing checks at external boundaries.
-
-Bug review asks Codex to prioritize crashes, incorrect state, data loss, bad edge cases, race conditions, broken assumptions, regressions, and missing tests.
-
-Architecture review asks Codex to prioritize module boundaries, state ownership, coupling, unclear contracts, scalability bottlenecks, operational risks, and code paths that are hard to change safely.
 
 ## Harness Engineering Practices
 
@@ -120,7 +134,7 @@ This app follows the harness engineering ideas from OpenAI's article:
 
 ## Safety Defaults
 
-The current app runs Codex in review mode and tells it not to edit files.
+The current app runs Codex in read-only investigation mode and tells it not to edit files.
 
 The first Codex command uses `--sandbox read-only`.
 
@@ -136,5 +150,4 @@ Realtime voice requires `OPENAI_API_KEY` in the local server environment.
 
 Codex must already be installed and authenticated on the machine.
 
-Long Codex investigations can take time. The UI shows pending tool-call state while Codex runs.
-
+Long Codex investigations can take time. The UI shows a running state while Codex runs, then displays the final model output.

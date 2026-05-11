@@ -1,8 +1,8 @@
 # AGENTS.md
 
-This app is a local voice code-review harness.
+This app is a local voice codebase Q&A harness.
 
-The goal is to let a user pick a local codebase, ask review questions by voice, and receive a real-time spoken answer plus a text transcript with file and line references.
+The goal is to let a user pick a local codebase, ask questions by voice, and receive a real-time spoken answer plus a text transcript with file and line references.
 
 The first implementation uses `gpt-realtime-2` for the live voice session and `codex exec` as the local investigation worker. Follow-up turns must reuse the same Codex session with `codex exec resume` so the review stays contextual inside one topic conversation.
 
@@ -14,15 +14,13 @@ Do not expose `OPENAI_API_KEY` to the browser. The browser sends WebRTC SDP to t
 
 The user selects a local folder in the UI. A browser cannot safely expose a real local folder path from a native picker, so the first app version accepts a folder path input and validates it on the local server.
 
-Supported review modes are:
+The user can choose Codex reasoning amount before asking a question. Pass this through to Codex as `model_reasoning_effort`.
 
-1. Security review
-2. Bug review
-3. Architecture review
+The user can choose voice speed and provide an extra voice system prompt. Voice speed is passed as Realtime instruction text.
 
-This app is for review and investigation. Codex should not edit files. Run Codex with read-only intent and read-only sandboxing where the CLI supports it.
+This app is for codebase questions and investigation. Codex should not edit files. Run Codex with read-only intent and read-only sandboxing where the CLI supports it.
 
-The UI should show both voice status and durable text output. Text output must preserve file and line references when Codex provides them.
+The UI should show voice status, Codex running state, and durable final model output. Text output must preserve file and line references when Codex provides them. Spoken answers should not read file names, paths, or line numbers aloud.
 
 ## Agentic Development Rules
 
@@ -52,7 +50,6 @@ The local server creates the Realtime session and registers an `ask_codex` tool.
 
 When the Realtime model needs codebase evidence, it calls `ask_codex`.
 
-The browser receives that tool call over the Realtime data channel, calls the local `/api/codex/ask` endpoint, then returns the Codex output to the Realtime session as `function_call_output`.
+The browser receives that tool call over the Realtime data channel, calls the local `/api/codex/ask/stream` endpoint, then returns the final Codex output to the Realtime session as `function_call_output`.
 
 The backend stores local conversation metadata under `.data/conversations.json`.
-

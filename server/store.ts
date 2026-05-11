@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { ConversationRecord, ConversationStoreFile, ReviewMode } from "./types";
+import type { CodexReasoningEffort, ConversationRecord, ConversationStoreFile } from "./types";
 
 const dataDir = path.resolve(".data");
 const storePath = path.join(dataDir, "conversations.json");
@@ -44,16 +44,16 @@ export async function getConversation(id: string): Promise<ConversationRecord | 
 
 export async function createConversation(input: {
   targetPath: string;
-  mode: ReviewMode;
   title?: string;
+  reasoningEffort?: CodexReasoningEffort;
 }): Promise<ConversationRecord> {
   const now = new Date().toISOString();
   const record: ConversationRecord = {
     id: crypto.randomUUID(),
-    title: input.title?.trim() || `${input.mode} review`,
+    title: input.title?.trim() || "Codebase question",
     token: `rtcodex-${crypto.randomUUID()}`,
     targetPath: input.targetPath,
-    mode: input.mode,
+    reasoningEffort: input.reasoningEffort ?? "medium",
     turns: 0,
     createdAt: now,
     updatedAt: now
@@ -77,4 +77,3 @@ export async function updateConversation(record: ConversationRecord): Promise<vo
 
   await writeStore(store);
 }
-

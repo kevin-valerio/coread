@@ -1,25 +1,29 @@
 import { FormEvent, useCallback, useMemo, useRef, useState } from "react";
 import {
-  Bug,
   FolderCheck,
   Mic,
   MicOff,
-  Network,
-  ShieldCheck,
   Square,
   Send,
   Volume2
 } from "lucide-react";
-import type { CodexAnswer, ConversationRecord, ReviewMode, TranscriptItem } from "./types";
+import type { CodexAnswer, CodexReasoningEffort, ConversationRecord, TranscriptItem } from "./types";
 
-const modeOptions: Array<{
-  mode: ReviewMode;
-  label: string;
-  icon: typeof ShieldCheck;
-}> = [
-  { mode: "security", label: "Security", icon: ShieldCheck },
-  { mode: "bug", label: "Bugs", icon: Bug },
-  { mode: "architecture", label: "Architecture", icon: Network }
+const reasoningOptions: Array<{ value: CodexReasoningEffort; label: string }> = [
+  { value: "minimal", label: "Minimal" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "Extra high" }
+];
+
+type VoiceSpeed = "slow" | "normal" | "fast" | "very-fast";
+
+const voiceSpeedOptions: Array<{ value: VoiceSpeed; label: string }> = [
+  { value: "slow", label: "Slow" },
+  { value: "normal", label: "Normal" },
+  { value: "fast", label: "Fast" },
+  { value: "very-fast", label: "Very fast" }
 ];
 
 type VoiceState = "idle" | "connecting" | "connected";
@@ -33,9 +37,12 @@ interface PendingToolCall {
 export function App() {
   const [targetPath, setTargetPath] = useState("~/Desktop");
   const [validatedPath, setValidatedPath] = useState("");
-  const [mode, setMode] = useState<ReviewMode>("security");
+  const [reasoningEffort, setReasoningEffort] = useState<CodexReasoningEffort>("medium");
+  const [voiceSpeed, setVoiceSpeed] = useState<VoiceSpeed>("fast");
+  const [voiceSystemPrompt, setVoiceSystemPrompt] = useState(
+    "When speaking, do not mention file names or line numbers. Keep exact references in the visible Codex output."
+  );
   const [conversation, setConversation] = useState<ConversationRecord | null>(null);
-  const [title, setTitle] = useState("New review topic");
   const [question, setQuestion] = useState("");
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [isAskingCodex, setIsAskingCodex] = useState(false);
@@ -58,7 +65,7 @@ export function App() {
       return "Connecting voice";
     }
 
-    return "Text review ready";
+    return "Text questions ready";
   }, [validatedPath, voiceState]);
 
   const addTranscript = useCallback((role: TranscriptItem["role"], text: string) => {
@@ -133,7 +140,7 @@ export function App() {
     const response = await fetch("/api/conversations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ targetPath: validatedPath, mode, title })
+      body: JSON.stringify({ targetPath: validatedPath, reasoningEffort })
     });
     const payload = (await response.json()) as { conversation: ConversationRecord };
     setConversation(payload.conversation);
@@ -143,25 +150,24 @@ export function App() {
   async function askCodex(text: string, callConversation?: ConversationRecord): Promise<CodexAnswer> {
     const activeConversation = callConversation ?? (await ensureConversation());
     setIsAskingCodex(true);
-    addTranscript("tool", "Codex is inspecting the codebase.");
 
     try {
-      const response = await fetch("/api/codex/ask", {
+      const response = await fetch("/api/codex/ask/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conversationId: activeConversation.id,
           targetPath: validatedPath,
-          mode,
           question: text,
-          title
+          reasoningEffort
         })
       });
-      const payload = (await response.json()) as CodexAnswer | { error: string };
 
-      if (!response.ok || "error" in payload) {
-        throw new Error("error" in payload ? payload.error : "Codex request failed.");
+      if (!response.ok) {
+        throw new Error(await response.text());
       }
+
+      const payload = await readCodexStream(response);
 
       setConversation((current) => {
         const base = current ?? activeConversation;
@@ -230,15 +236,17 @@ export function App() {
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
 
-      const response = await fetch("/api/realtime/session", {
+      const response = await fetch("/api/realtime/session/json", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/sdp",
-          "X-Target-Path": validatedPath,
-          "X-Conversation-Id": activeConversation.id,
-          "X-Review-Mode": mode
-        },
-        body: offer.sdp
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sdp: offer.sdp,
+          targetPath: validatedPath,
+          conversationId: activeConversation.id,
+          reasoningEffort,
+          voiceSpeed,
+          voiceSystemPrompt
+        })
       });
       const answerSdp = await response.text();
 
@@ -303,14 +311,12 @@ export function App() {
   async function answerToolCall(toolCall: PendingToolCall, activeConversation: ConversationRecord) {
     const args = JSON.parse(toolCall.argumentsText || "{}") as {
       question?: string;
-      mode?: ReviewMode;
       conversation_id?: string;
     };
-    const toolQuestion = args.question?.trim() || "Review the selected codebase.";
+    const toolQuestion = args.question?.trim() || "Investigate the selected codebase.";
     const result = await askCodex(toolQuestion, {
       ...activeConversation,
-      id: args.conversation_id || activeConversation.id,
-      mode: args.mode || activeConversation.mode
+      id: args.conversation_id || activeConversation.id
     });
     const channel = dataChannelRef.current;
 
@@ -335,10 +341,10 @@ export function App() {
     <main className="app-shell">
       <audio ref={audioRef} autoPlay />
       <section className="workspace">
-        <aside className="control-panel" aria-label="Review controls">
+        <aside className="control-panel" aria-label="Question controls">
           <div className="brand-row">
             <div>
-              <p className="eyebrow">Local voice review</p>
+              <p className="eyebrow">Local voice Q&amp;A</p>
               <h1>Realtime Codex Reviewer</h1>
             </div>
             <span className={`state-pill ${voiceState}`}>{statusText}</span>
@@ -359,29 +365,41 @@ export function App() {
           </label>
 
           <label className="field">
-            <span>Conversation title</span>
-            <input value={title} onChange={(event) => setTitle(event.target.value)} />
+            <span>Codex reasoning</span>
+            <select
+              value={reasoningEffort}
+              onChange={(event) => setReasoningEffort(event.target.value as CodexReasoningEffort)}
+            >
+              {reasoningOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </label>
 
-          <div className="field">
-            <span>Review mode</span>
-            <div className="segmented">
-              {modeOptions.map((option) => {
-                const Icon = option.icon;
-                return (
-                  <button
-                    key={option.mode}
-                    className={mode === option.mode ? "active" : ""}
-                    type="button"
-                    onClick={() => setMode(option.mode)}
-                  >
-                    <Icon size={16} />
-                    <span>{option.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <label className="field">
+            <span>Voice speed</span>
+            <select
+              value={voiceSpeed}
+              onChange={(event) => setVoiceSpeed(event.target.value as VoiceSpeed)}
+            >
+              {voiceSpeedOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>System prompt</span>
+            <textarea
+              value={voiceSystemPrompt}
+              onChange={(event) => setVoiceSystemPrompt(event.target.value)}
+              placeholder="Extra voice instructions. Example: answer in very short bullets."
+            />
+          </label>
 
           <div className="voice-actions">
             {voiceState === "idle" ? (
@@ -406,10 +424,14 @@ export function App() {
             <strong>{validatedPath || "Not selected"}</strong>
             <span>Codex session</span>
             <strong>{conversation?.codexSessionId || "Created after first question"}</strong>
+            <span>Reasoning</span>
+            <strong>{reasoningOptions.find((option) => option.value === reasoningEffort)?.label}</strong>
+            <span>Voice speed</span>
+            <strong>{voiceSpeedOptions.find((option) => option.value === voiceSpeed)?.label}</strong>
           </div>
         </aside>
 
-        <section className="review-panel" aria-label="Review transcript">
+        <section className="review-panel" aria-label="Question transcript">
           <div className="transcript-header">
             <div>
               <p className="eyebrow">Transcript</p>
@@ -421,7 +443,7 @@ export function App() {
           <div className="transcript-list">
             {transcript.length === 0 ? (
               <div className="empty-state">
-                <p>Validate a codebase, then ask a review question.</p>
+                <p>Validate a codebase, then ask a question.</p>
               </div>
             ) : (
               transcript.map((item) => (
@@ -440,7 +462,7 @@ export function App() {
             <textarea
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
-              placeholder="Ask a review question. Example: where can untrusted input reach file system writes?"
+              placeholder="Ask a codebase question. Example: where can untrusted input reach file system writes?"
             />
             <button className="icon-button send-button" type="submit" disabled={!canAsk} title="Ask Codex">
               <Send size={18} />
@@ -450,6 +472,102 @@ export function App() {
       </section>
     </main>
   );
+}
+
+async function readCodexStream(response: Response): Promise<CodexAnswer> {
+  const reader = response.body?.getReader();
+
+  if (!reader) {
+    throw new Error("Codex stream is not available.");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalAnswer: CodexAnswer | undefined;
+  let streamError: string | undefined;
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const parsed = drainSseBuffer(buffer);
+    buffer = parsed.remainder;
+
+    for (const event of parsed.events) {
+      if (event.event === "final") {
+        finalAnswer = JSON.parse(event.data) as CodexAnswer;
+      } else if (event.event === "error") {
+        const payload = JSON.parse(event.data) as { error?: string };
+        streamError = payload.error || "Codex request failed.";
+      }
+    }
+  }
+
+  const parsed = drainSseBuffer(buffer);
+  for (const event of parsed.events) {
+    if (event.event === "final") {
+      finalAnswer = JSON.parse(event.data) as CodexAnswer;
+    } else if (event.event === "error") {
+      const payload = JSON.parse(event.data) as { error?: string };
+      streamError = payload.error || "Codex request failed.";
+    }
+  }
+
+  if (streamError) {
+    throw new Error(streamError);
+  }
+
+  if (!finalAnswer) {
+    throw new Error("Codex stream ended without a final answer.");
+  }
+
+  return finalAnswer;
+}
+
+function drainSseBuffer(buffer: string): {
+  events: Array<{ event: string; data: string }>;
+  remainder: string;
+} {
+  const events: Array<{ event: string; data: string }> = [];
+  let cursor = buffer.indexOf("\n\n");
+
+  while (cursor !== -1) {
+    const block = buffer.slice(0, cursor);
+    buffer = buffer.slice(cursor + 2);
+    const parsed = parseSseBlock(block);
+
+    if (parsed) {
+      events.push(parsed);
+    }
+
+    cursor = buffer.indexOf("\n\n");
+  }
+
+  return { events, remainder: buffer };
+}
+
+function parseSseBlock(block: string): { event: string; data: string } | undefined {
+  const lines = block.split("\n");
+  let event = "message";
+  const dataLines: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith("event:")) {
+      event = line.slice("event:".length).trim();
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice("data:".length).trim());
+    }
+  }
+
+  if (dataLines.length === 0) {
+    return undefined;
+  }
+
+  return { event, data: dataLines.join("\n") };
 }
 
 function extractToolCall(event: Record<string, unknown>): PendingToolCall | undefined {

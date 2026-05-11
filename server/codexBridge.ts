@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { CodexAnswer, CodexQuestion, ConversationRecord } from "./types";
+import type { CodexAnswer, CodexQuestion, CodexReasoningEffort, ConversationRecord } from "./types";
 import { buildFirstTurnPrompt, buildFollowUpPrompt } from "./prompts";
 import { createConversation, getConversation, updateConversation } from "./store";
 import { resolveDirectory } from "./pathUtils";
@@ -16,6 +16,13 @@ interface CodexRunResult {
   stderr: string;
   outputFile: string;
 }
+
+export interface CodexProgressEvent {
+  type: "status" | "stdout" | "stderr";
+  text: string;
+}
+
+type CodexProgressHandler = (event: CodexProgressEvent) => void;
 
 export function extractSessionIdFromText(text: string): string | undefined {
   const lines = text.split(/\r?\n/).filter(Boolean);
@@ -76,7 +83,73 @@ function findSessionIdInJson(value: unknown): string | undefined {
   return undefined;
 }
 
-export async function askCodex(input: CodexQuestion): Promise<CodexAnswer> {
+export function summarizeCodexJsonLine(line: string): string | undefined {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return line.trim() || undefined;
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    return undefined;
+  }
+
+  const event = parsed as Record<string, unknown>;
+  const type = String(event.type ?? "");
+
+  if (type === "thread.started") {
+    return `Codex thread started: ${String(event.thread_id ?? "unknown")}`;
+  }
+
+  if (type === "turn.started") {
+    return "Codex turn started.";
+  }
+
+  if (type === "turn.completed") {
+    const usage = event.usage as Record<string, unknown> | undefined;
+    const outputTokens = usage?.output_tokens;
+    const inputTokens = usage?.input_tokens;
+
+    if (typeof inputTokens === "number" && typeof outputTokens === "number") {
+      return `Codex turn completed. Tokens: ${inputTokens} input, ${outputTokens} output.`;
+    }
+
+    return "Codex turn completed.";
+  }
+
+  const item = event.item as Record<string, unknown> | undefined;
+
+  if (!item) {
+    return type || undefined;
+  }
+
+  if (item.type === "command_execution") {
+    const command = String(item.command ?? "").trim();
+
+    if (type === "item.started") {
+      return command ? `$ ${command}` : "Codex started a command.";
+    }
+
+    const exitCode = item.exit_code;
+    const output = String(item.aggregated_output ?? "").trim();
+    const status = typeof exitCode === "number" ? `Command exited ${exitCode}.` : "Command completed.";
+
+    return output ? `${status}\n${output}` : status;
+  }
+
+  if (item.type === "agent_message" && type === "item.completed") {
+    return "Codex final answer is ready.";
+  }
+
+  return type || undefined;
+}
+
+export async function askCodex(
+  input: CodexQuestion,
+  onProgress?: CodexProgressHandler
+): Promise<CodexAnswer> {
   const targetPath = await resolveDirectory(input.targetPath);
   const conversation = await loadOrCreateConversation(input, targetPath);
   const isFirstTurn = !conversation.codexSessionId;
@@ -85,7 +158,7 @@ export async function askCodex(input: CodexQuestion): Promise<CodexAnswer> {
     : buildFollowUpPrompt(conversation, input.question);
 
   const startedAt = Date.now();
-  const run = await runCodex(conversation, prompt, isFirstTurn);
+  const run = await runCodex(conversation, prompt, isFirstTurn, onProgress);
   const detectedSessionId =
     conversation.codexSessionId ??
     extractSessionIdFromText(run.stdout) ??
@@ -116,24 +189,29 @@ async function loadOrCreateConversation(
       throw new Error("Conversation not found");
     }
 
-    return existing;
+    return {
+      ...existing,
+      reasoningEffort: input.reasoningEffort ?? existing.reasoningEffort ?? "medium"
+    };
   }
 
   return createConversation({
     targetPath,
-    mode: input.mode,
-    title: input.title
+    title: input.title,
+    reasoningEffort: input.reasoningEffort
   });
 }
 
 async function runCodex(
   conversation: ConversationRecord,
   prompt: string,
-  isFirstTurn: boolean
+  isFirstTurn: boolean,
+  onProgress?: CodexProgressHandler
 ): Promise<CodexRunResult> {
   const outputDir = path.resolve(".data", "codex-output");
   await fs.mkdir(outputDir, { recursive: true });
   const outputFile = path.join(outputDir, `${conversation.id}-${Date.now()}.md`);
+  const reasoningConfig = `model_reasoning_effort="${getReasoningEffort(conversation.reasoningEffort)}"`;
   const args = isFirstTurn
     ? [
         "exec",
@@ -141,6 +219,8 @@ async function runCodex(
         "--skip-git-repo-check",
         "--sandbox",
         "read-only",
+        "-c",
+        reasoningConfig,
         "-C",
         conversation.targetPath,
         "-o",
@@ -155,12 +235,25 @@ async function runCodex(
         "--skip-git-repo-check",
         "-c",
         'sandbox_mode="read-only"',
+        "-c",
+        reasoningConfig,
         "-o",
         outputFile,
         "-"
       ];
 
-  const { stdout, stderr } = await runProcess("codex", args, prompt, conversation.targetPath);
+  onProgress?.({
+    type: "status",
+    text: isFirstTurn ? "Starting a new Codex session." : "Resuming the Codex session."
+  });
+
+  const { stdout, stderr } = await runProcess(
+    "codex",
+    args,
+    prompt,
+    conversation.targetPath,
+    onProgress
+  );
   const answer = await readOutputAnswer(outputFile, stdout);
 
   if (!answer.trim()) {
@@ -170,11 +263,16 @@ async function runCodex(
   return { answer, stdout, stderr, outputFile };
 }
 
+function getReasoningEffort(value: CodexReasoningEffort | undefined): CodexReasoningEffort {
+  return value ?? "medium";
+}
+
 function runProcess(
   command: string,
   args: string[],
   stdin: string,
-  cwd: string
+  cwd: string,
+  onProgress?: CodexProgressHandler
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -185,6 +283,8 @@ function runProcess(
 
     let stdout = "";
     let stderr = "";
+    let stdoutBuffer = "";
+    let stderrBuffer = "";
     let settled = false;
 
     const timer = setTimeout(() => {
@@ -199,9 +299,23 @@ function runProcess(
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
+      stdoutBuffer = emitCompleteLines(stdoutBuffer + chunk, (line) => {
+        const text = summarizeCodexJsonLine(line);
+
+        if (text) {
+          onProgress?.({ type: "stdout", text });
+        }
+      });
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
+      stderrBuffer = emitCompleteLines(stderrBuffer + chunk, (line) => {
+        const text = line.trim();
+
+        if (text) {
+          onProgress?.({ type: "stderr", text });
+        }
+      });
     });
     child.on("error", (error) => {
       clearTimeout(timer);
@@ -219,6 +333,20 @@ function runProcess(
       settled = true;
 
       if (code === 0) {
+        flushLineBuffer(stdoutBuffer, (line) => {
+          const text = summarizeCodexJsonLine(line);
+
+          if (text) {
+            onProgress?.({ type: "stdout", text });
+          }
+        });
+        flushLineBuffer(stderrBuffer, (line) => {
+          const text = line.trim();
+
+          if (text) {
+            onProgress?.({ type: "stderr", text });
+          }
+        });
         resolve({ stdout, stderr });
       } else {
         reject(new Error(`Codex exited with code ${code}. stderr: ${stderr.slice(-2000)}`));
@@ -227,6 +355,25 @@ function runProcess(
 
     child.stdin.end(stdin);
   });
+}
+
+function emitCompleteLines(buffer: string, onLine: (line: string) => void): string {
+  const lines = buffer.split(/\r?\n/);
+  const remainder = lines.pop() ?? "";
+
+  for (const line of lines) {
+    if (line.trim()) {
+      onLine(line);
+    }
+  }
+
+  return remainder;
+}
+
+function flushLineBuffer(buffer: string, onLine: (line: string) => void): void {
+  if (buffer.trim()) {
+    onLine(buffer);
+  }
 }
 
 async function readOutputAnswer(outputFile: string, stdout: string): Promise<string> {
@@ -302,4 +449,3 @@ async function listRecentSessionFiles(root: string, minMtimeMs: number): Promise
   await walk(root);
   return results.sort();
 }
-

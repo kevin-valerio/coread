@@ -8,7 +8,7 @@ Build a minimal local app that connects browser microphone input to `gpt-realtim
 2. Add local server endpoints for path validation, conversation storage, Realtime WebRTC session creation, and Codex questions.
 3. Implement Codex subprocess bridge with first-turn and resume-turn support.
 4. Implement browser WebRTC client and Realtime function-call handling.
-5. Add basic tests for path expansion, session-id parsing, and prompt mode mapping.
+5. Add basic tests for path expansion and session-id parsing.
 6. Run typecheck and tests.
 7. Start the local dev server and verify the UI renders.
 
@@ -23,4 +23,3 @@ Manual check:
 ```text
 Open http://127.0.0.1:5173 and verify the app renders.
 ```
-

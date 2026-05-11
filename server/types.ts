@@ -1,11 +1,11 @@
-export type ReviewMode = "security" | "bug" | "architecture";
+export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface ConversationRecord {
   id: string;
   title: string;
   token: string;
   targetPath: string;
-  mode: ReviewMode;
+  reasoningEffort?: CodexReasoningEffort;
   codexSessionId?: string;
   turns: number;
   createdAt: string;
@@ -19,9 +19,9 @@ export interface ConversationStoreFile {
 export interface CodexQuestion {
   conversationId?: string;
   targetPath: string;
-  mode: ReviewMode;
   question: string;
   title?: string;
+  reasoningEffort?: CodexReasoningEffort;
 }
 
 export interface CodexAnswer {
@@ -31,4 +31,3 @@ export interface CodexAnswer {
   durationMs: number;
   outputFile: string;
 }
-
