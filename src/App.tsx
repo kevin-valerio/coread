@@ -26,6 +26,7 @@ import {
   summarizeCostEntries
 } from "../shared/cost";
 import type { CodexUsageRecord, CostCalculation, CostEntry } from "../shared/cost";
+import { buildCodexVoiceToolOutput } from "./codexVoiceOutput";
 import type {
   CodexAnswer,
   CodexProgressEvent,
@@ -78,6 +79,7 @@ const voiceSpeedOptions: Array<{ value: VoiceSpeed; label: string }> = [
 const defaultCodeViewerWidth = 720;
 const minCodeViewerWidth = 360;
 const codeViewerWorkspaceReserve = 620;
+const microphoneReenableDelayMs = 1800;
 
 type VoiceState = "idle" | "connecting" | "connected";
 type VoiceActivity = "idle" | "connecting" | "waiting" | "listening" | "thinking" | "speaking" | "researching";
@@ -187,6 +189,8 @@ export function App() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const previewUrlRef = useRef<string | null>(null);
+  const microphoneTracksRef = useRef<MediaStreamTrack[]>([]);
+  const microphoneEnableTimerRef = useRef<number | undefined>(undefined);
   const quizQuestionsRef = useRef<QuizQuestion[]>([]);
   const activeQuizQuestionIdRef = useRef<string | null>(null);
   const handledToolCallIdsRef = useRef<Set<string>>(new Set());
@@ -304,6 +308,38 @@ export function App() {
       return [...items.slice(0, -1), { ...last, streaming: false }];
     });
   }, []);
+
+  const setMicrophoneEnabled = useCallback((enabled: boolean) => {
+    if (microphoneEnableTimerRef.current !== undefined) {
+      window.clearTimeout(microphoneEnableTimerRef.current);
+      microphoneEnableTimerRef.current = undefined;
+    }
+
+    microphoneTracksRef.current.forEach((track) => {
+      track.enabled = enabled;
+    });
+  }, []);
+
+  const scheduleMicrophoneEnable = useCallback(() => {
+    if (microphoneEnableTimerRef.current !== undefined) {
+      window.clearTimeout(microphoneEnableTimerRef.current);
+    }
+
+    microphoneEnableTimerRef.current = window.setTimeout(() => {
+      microphoneEnableTimerRef.current = undefined;
+      microphoneTracksRef.current.forEach((track) => {
+        track.enabled = true;
+      });
+    }, microphoneReenableDelayMs);
+  }, []);
+
+  const createAssistantResponse = useCallback(
+    (channel: RTCDataChannel) => {
+      setMicrophoneEnabled(false);
+      channel.send(JSON.stringify({ type: "response.create" }));
+    },
+    [setMicrophoneEnabled]
+  );
 
   const addCostCalculation = useCallback((calculation: CostCalculation) => {
     setCostEntries((items) => [
@@ -652,7 +688,7 @@ export function App() {
         }
       })
     );
-    channel.send(JSON.stringify({ type: "response.create" }));
+    createAssistantResponse(channel);
   }
 
   const openFileReference = useCallback(
@@ -737,7 +773,14 @@ export function App() {
 
     try {
       const activeConversation = await ensureConversation(activeTargetPath);
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      microphoneTracksRef.current = stream.getAudioTracks();
       const peer = new RTCPeerConnection();
       peerRef.current = peer;
 
@@ -808,9 +851,14 @@ export function App() {
 
   function disconnectVoice() {
     stopVoicePreview();
+    if (microphoneEnableTimerRef.current !== undefined) {
+      window.clearTimeout(microphoneEnableTimerRef.current);
+      microphoneEnableTimerRef.current = undefined;
+    }
     dataChannelRef.current?.close();
     peerRef.current?.getSenders().forEach((sender) => sender.track?.stop());
     peerRef.current?.close();
+    microphoneTracksRef.current = [];
     dataChannelRef.current = null;
     peerRef.current = null;
     setVoiceState("idle");
@@ -851,6 +899,7 @@ export function App() {
 
     if (type === "error" || type.endsWith("_error")) {
       addTranscript("error", readRealtimeErrorMessage(event));
+      scheduleMicrophoneEnable();
       setVoiceActivity("waiting");
       return;
     }
@@ -893,6 +942,7 @@ export function App() {
     ) {
       const delta = String(event.delta ?? "");
       if (delta) {
+        setMicrophoneEnabled(false);
         setVoiceActivity("speaking");
         appendAssistantDelta(delta);
       }
@@ -929,6 +979,7 @@ export function App() {
         }
       }
 
+      scheduleMicrophoneEnable();
       setVoiceActivity("waiting");
       return;
     }
@@ -974,11 +1025,11 @@ export function App() {
         item: {
           type: "function_call_output",
           call_id: toolCall.callId,
-          output: JSON.stringify(result)
+          output: JSON.stringify(buildCodexVoiceToolOutput(result))
         }
       })
     );
-    channel.send(JSON.stringify({ type: "response.create" }));
+    createAssistantResponse(channel);
   }
 
   async function answerQuizGradeToolCall(
@@ -1017,7 +1068,7 @@ export function App() {
           }
         })
       );
-      channel.send(JSON.stringify({ type: "response.create" }));
+      createAssistantResponse(channel);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Quiz answer could not be graded.";
       setQuizError(message);
@@ -1031,7 +1082,7 @@ export function App() {
           }
         })
       );
-      channel.send(JSON.stringify({ type: "response.create" }));
+      createAssistantResponse(channel);
     }
   }
 

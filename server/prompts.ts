@@ -12,7 +12,9 @@ export function buildFirstTurnPrompt(conversation: ConversationRecord, question:
     "3. Answer the user's question directly.",
     "4. Include file and line references for evidence.",
     "5. If the code does not show enough evidence, say what you checked.",
-    "6. Use simple English and keep the answer concise enough to be spoken by a voice assistant.",
+    '6. Start with "Short version:" and one short paragraph that is useful for voice playback.',
+    "7. After that, include any needed details and file and line references.",
+    "8. Use simple English and keep the answer concise enough to be spoken by a voice assistant.",
     "",
     "User question:",
     question
@@ -30,7 +32,9 @@ export function buildFollowUpPrompt(conversation: ConversationRecord, question: 
     "2. Inspect any newly relevant files before making claims.",
     "3. Do not edit files. This is a read-only investigation.",
     "4. Include file and line references for evidence.",
-    "5. Use simple English and keep the answer concise enough to be spoken by a voice assistant.",
+    '5. Start with "Short version:" and one short paragraph that is useful for voice playback.',
+    "6. After that, include any needed details and file and line references.",
+    "7. Use simple English and keep the answer concise enough to be spoken by a voice assistant.",
     "",
     "Follow-up question:",
     question

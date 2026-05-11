@@ -19,6 +19,9 @@ describe("buildRealtimeSessionConfig", () => {
     expect(instructions).toContain(
       'Example: say "Let me check that", not "Let me check that quickly so I can give you the exact folder name."'
     );
+    expect(instructions).toContain("When ask_codex returns a spoken_summary field");
+    expect(instructions).toContain("Do not read the full Codex answer aloud.");
+    expect(instructions).toContain("After saying the summary once, stop and wait");
     expect(instructions).toContain("Do not say file names, paths, or line numbers aloud.");
     expect(instructions).toContain("Codex reasoning amount selected by the user: high");
     expect(config.audio).toEqual({ output: { voice: "cedar" } });

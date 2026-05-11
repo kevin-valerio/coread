@@ -96,6 +96,8 @@ Voice previews use `POST /api/voice/preview`. The local server calls the OpenAI 
 
 The voice is instructed not to say file names, paths, or line numbers aloud. Exact references stay in the visible Codex output.
 
+After Codex finishes, the browser stores the full Codex answer in the transcript but sends Realtime only a compact `spoken_summary` from the `Short version` or `Short answer` paragraph. The voice says that summary or a close paraphrase.
+
 Realtime cost is calculated from `response.done`. The app uses text, audio, image, cached input, and output token details when they are present. If a response does not include enough detail to price safely, the tokens are counted as unpriced.
 
 ## Codex Tool Contract
@@ -117,7 +119,18 @@ Arguments:
 
 The browser also sends the selected Codex reasoning amount to the local server request. The stream sends structured `usage` progress events when Codex reports token usage. The UI prices those events with the shared calculator in `shared/cost.ts`.
 
-Result:
+Before returning the tool result to Realtime, the browser converts the backend result to a voice payload:
+
+```json
+{
+  "conversation_id": "local-conversation-id",
+  "codex_session_id": "codex-session-id",
+  "spoken_summary": "Short spoken result without file references",
+  "full_answer_visible_in_transcript": true
+}
+```
+
+Backend result:
 
 ```json
 {

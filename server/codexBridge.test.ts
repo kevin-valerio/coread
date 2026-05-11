@@ -3,6 +3,7 @@ import {
   extractCodexModelFromJsonLine,
   extractCodexUsageFromJsonLine,
   extractSessionIdFromText,
+  formatCodexExitError,
   summarizeCodexJsonLine
 } from "./codexBridge";
 
@@ -40,6 +41,34 @@ describe("summarizeCodexJsonLine", () => {
     });
 
     expect(summarizeCodexJsonLine(line)).toBe("Codex turn completed. Tokens: 10 input, 2 output.");
+  });
+
+  it("summarizes a task completion without a final answer", () => {
+    const line = JSON.stringify({
+      type: "event_msg",
+      payload: { type: "task_complete", last_agent_message: null }
+    });
+
+    expect(summarizeCodexJsonLine(line)).toBe("Codex task completed without a final answer.");
+  });
+});
+
+describe("formatCodexExitError", () => {
+  it("uses stdout summaries when stderr is empty", () => {
+    const stdout = [
+      JSON.stringify({ type: "turn.started" }),
+      JSON.stringify({
+        type: "event_msg",
+        payload: { type: "task_complete", last_agent_message: null }
+      })
+    ].join("\n");
+
+    expect(formatCodexExitError(1, stdout, "")).toContain(
+      "Codex exited with code 1 and did not write to stderr. Last stdout events:"
+    );
+    expect(formatCodexExitError(1, stdout, "")).toContain(
+      "Codex task completed without a final answer."
+    );
   });
 });
 

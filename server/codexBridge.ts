@@ -122,6 +122,14 @@ export function summarizeCodexJsonLine(line: string): string | undefined {
     return "Codex turn completed.";
   }
 
+  const payload = event.payload as Record<string, unknown> | undefined;
+
+  if (type === "event_msg" && payload?.type === "task_complete") {
+    return typeof payload.last_agent_message === "string" && payload.last_agent_message.trim()
+      ? "Codex task completed."
+      : "Codex task completed without a final answer.";
+  }
+
   const item = event.item as Record<string, unknown> | undefined;
 
   if (!item) {
@@ -170,6 +178,29 @@ export function extractCodexModelFromJsonLine(line: string): string | undefined 
   }
 
   return undefined;
+}
+
+export function formatCodexExitError(code: number | null, stdout: string, stderr: string): string {
+  const exitCode = code ?? "unknown";
+  const stderrText = stderr.trim();
+
+  if (stderrText) {
+    return `Codex exited with code ${exitCode}. stderr: ${stderrText.slice(-2000)}`;
+  }
+
+  const stdoutSummary = stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => summarizeCodexJsonLine(line))
+    .filter((line): line is string => Boolean(line))
+    .slice(-6)
+    .join("\n");
+
+  if (stdoutSummary) {
+    return `Codex exited with code ${exitCode} and did not write to stderr. Last stdout events:\n${stdoutSummary}`;
+  }
+
+  return `Codex exited with code ${exitCode} and did not write to stderr or stdout.`;
 }
 
 export function extractCodexUsageFromJsonLine(
@@ -442,7 +473,7 @@ function runProcess(
         });
         resolve({ stdout, stderr, usage: lastUsage });
       } else {
-        reject(new Error(`Codex exited with code ${code}. stderr: ${stderr.slice(-2000)}`));
+        reject(new Error(formatCodexExitError(code, stdout, stderr)));
       }
     });
 
