@@ -596,12 +596,6 @@ export function App() {
                   <strong>{formatCredits(costSummary.totalCredits)}</strong>
                 </>
               ) : null}
-              <span>Input tokens</span>
-              <strong>{formatTokens(costSummary.inputTokens)}</strong>
-              <span>Cached input</span>
-              <strong>{formatTokens(costSummary.cachedInputTokens)}</strong>
-              <span>Output tokens</span>
-              <strong>{formatTokens(costSummary.outputTokens)}</strong>
             </div>
 
             {costSummary.unpricedTokens > 0 ? (

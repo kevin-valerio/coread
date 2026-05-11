@@ -40,6 +40,21 @@ describe("calculateCodexCost", () => {
     expect(cost.unpricedTokens).toBe(0);
   });
 
+  it("prices gpt-5.1-codex usage", () => {
+    const cost = calculateCodexCost({
+      source: "codex",
+      model: "gpt-5.1-codex",
+      inputTokens: 2000,
+      cachedInputTokens: 500,
+      outputTokens: 100,
+      reasoningOutputTokens: 0,
+      totalTokens: 2100
+    });
+
+    expect(cost.costUsd).toBeCloseTo(0.0029375);
+    expect(cost.unpricedTokens).toBe(0);
+  });
+
   it("does not guess costs for unknown models", () => {
     const cost = calculateCodexCost({
       source: "codex",

@@ -135,6 +135,11 @@ const textModelPrices: Record<string, TokenPrice> = {
     cachedInputUsdPerMillion: 0.125,
     outputUsdPerMillion: 10
   },
+  "gpt-5.1-codex": {
+    inputUsdPerMillion: 1.25,
+    cachedInputUsdPerMillion: 0.125,
+    outputUsdPerMillion: 10
+  },
   "gpt-5": {
     inputUsdPerMillion: 1.25,
     cachedInputUsdPerMillion: 0.125,
