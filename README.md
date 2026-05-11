@@ -6,6 +6,8 @@ The browser connects to `gpt-realtime-2` through a local Express server. The Rea
 
 Questions are voice-only from the microphone. The UI shows animated voice state, shows when Codex is running, then displays the final assistant output with Markdown rendering. It lets the user choose Codex reasoning amount, preview and select a Realtime voice, choose voice speed, add extra voice instructions, and track live API cost.
 
+Markdown file links with line references, such as `[src/App.tsx:42](src/App.tsx:42)`, open an in-app code side panel. The server only reads files inside the validated codebase path. The viewer highlights syntax and centers the referenced line.
+
 The compact cost panel uses actual token usage events. Realtime cost is calculated from `response.done`. Codex cost is calculated from `codex exec --json` usage when the CLI reports it. Prices are kept in `shared/cost.ts` with the verification date and source links.
 
 Bridge notes are in `docs/codex-bridge-investigation.md`.

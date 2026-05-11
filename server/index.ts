@@ -1,10 +1,12 @@
 import cors from "cors";
 import express from "express";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { askCodex } from "./codexBridge";
 import { createRealtimeSession } from "./realtime";
 import { createVoicePreview } from "./voicePreview";
 import { createConversation, listConversations } from "./store";
-import { resolveDirectory } from "./pathUtils";
+import { resolveDirectory, resolveFileInsideDirectory } from "./pathUtils";
 import type { CodexReasoningEffort } from "./types";
 
 const app = express();
@@ -48,6 +50,25 @@ app.post("/api/codebase/validate", async (req, res, next) => {
     res.json({ ok: true, targetPath });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid path";
+    res.status(400).json({ ok: false, error: message });
+  }
+});
+
+app.post("/api/codebase/file", async (req, res) => {
+  try {
+    const targetPath = await resolveDirectory(String(req.body?.targetPath ?? ""));
+    const filePath = await resolveFileInsideDirectory(targetPath, String(req.body?.filePath ?? ""));
+    const rootRealPath = await fs.realpath(targetPath);
+    const content = await fs.readFile(filePath, "utf8");
+
+    res.json({
+      ok: true,
+      filePath,
+      relativePath: path.relative(rootRealPath, filePath),
+      content
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "File could not be opened";
     res.status(400).json({ ok: false, error: message });
   }
 });

@@ -23,6 +23,7 @@ The app must support follow-up questions inside one conversation. A single codeb
 11. The browser returns the Codex result to the Realtime session.
 12. The Realtime model speaks a concise answer and the UI stores the text transcript.
 13. The UI updates cost totals when Realtime or Codex reports token usage.
+14. If assistant Markdown contains a file link with a line reference, the user can open it in an in-app code side panel.
 
 ## Follow-Up Context
 
@@ -147,6 +148,8 @@ The first Codex command uses `--sandbox read-only`.
 The Realtime model can trigger Codex investigation, but it cannot directly execute shell commands. It can only call the local `ask_codex` tool.
 
 The server validates paths at the API boundary.
+
+Markdown file references are opened through `POST /api/codebase/file`. The browser sends the selected codebase path and the linked file path. The server resolves the file through the real filesystem path and rejects files outside the selected codebase before reading content.
 
 ## Known Limitations
 

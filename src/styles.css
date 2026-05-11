@@ -47,8 +47,14 @@ button:disabled {
   margin: 0 auto;
 }
 
+.workspace.with-code-viewer {
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr) minmax(360px, 520px);
+  max-width: 1760px;
+}
+
 .control-panel,
-.review-panel {
+.review-panel,
+.code-viewer-panel {
   min-height: calc(100vh - 48px);
   border: 1px solid #d8d4ca;
   border-radius: 8px;
@@ -67,6 +73,13 @@ button:disabled {
   display: grid;
   grid-template-rows: auto 1fr;
   min-width: 0;
+}
+
+.code-viewer-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .brand-row,
@@ -569,6 +582,21 @@ textarea:focus {
   color: #1f6f60;
 }
 
+.markdown-file-link {
+  display: inline;
+  border: 0;
+  padding: 0;
+  color: #1f6f60;
+  background: transparent;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.markdown-file-link:hover {
+  color: #174f45;
+}
+
 .markdown-body blockquote {
   margin-left: 0;
   padding-left: 12px;
@@ -627,22 +655,120 @@ textarea:focus {
   background: transparent;
 }
 
+.code-viewer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #ded9cf;
+}
+
+.code-viewer-header span {
+  display: block;
+  margin-bottom: 4px;
+  color: #625b50;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.code-viewer-header strong {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #151515;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.code-viewer-state {
+  align-self: start;
+  margin: 16px;
+  border: 1px solid #d6d0c4;
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #514a42;
+  background: #faf7ef;
+  font-size: 13px;
+}
+
+.code-viewer-state.error {
+  border-color: #dda999;
+  color: #6d2a1f;
+  background: #fff1ed;
+}
+
+.code-viewer-code {
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 0;
+  background: #ffffff;
+  color: #24292f;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.code-viewer-line {
+  display: flex;
+  min-width: max-content;
+}
+
+.code-viewer-line.target {
+  background: #fff2b3;
+  outline: 1px solid #d8a600;
+  outline-offset: -1px;
+}
+
+.code-viewer-line-number {
+  position: sticky;
+  left: 0;
+  flex: 0 0 54px;
+  padding: 0 10px;
+  border-right: 1px solid #e4dfd6;
+  color: #7b7369;
+  background: #ffffff;
+  text-align: right;
+  user-select: none;
+}
+
+.code-viewer-line.target .code-viewer-line-number {
+  color: #5c4400;
+  background: #fff2b3;
+  font-weight: 800;
+}
+
+.code-viewer-line code.hljs {
+  display: block;
+  padding: 0 12px;
+  background: transparent;
+  white-space: pre;
+}
+
 @media (max-width: 960px) {
   .app-shell {
     padding: 12px;
   }
 
-  .workspace {
+  .workspace,
+  .workspace.with-code-viewer {
     grid-template-columns: 1fr;
   }
 
   .control-panel,
-  .review-panel {
+  .review-panel,
+  .code-viewer-panel {
     min-height: auto;
   }
 
   .review-panel {
     min-height: 620px;
+  }
+
+  .code-viewer-panel {
+    min-height: 520px;
   }
 }
 

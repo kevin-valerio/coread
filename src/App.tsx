@@ -1,12 +1,15 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FolderCheck,
   Mic,
   MicOff,
   Play,
   Square,
-  Volume2
+  Volume2,
+  X
 } from "lucide-react";
+import hljs from "highlight.js";
+import "highlight.js/styles/github.css";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -81,6 +84,20 @@ interface PendingToolCall {
   argumentsText: string;
 }
 
+interface FileReference {
+  filePath: string;
+  line: number;
+}
+
+interface CodeViewerState {
+  requestedPath: string;
+  displayPath: string;
+  content: string;
+  targetLine: number;
+  loading: boolean;
+  error?: string;
+}
+
 export function App() {
   const [targetPath, setTargetPath] = useState("~/Desktop");
   const [validatedPath, setValidatedPath] = useState("");
@@ -95,6 +112,7 @@ export function App() {
   const [isAskingCodex, setIsAskingCodex] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [costEntries, setCostEntries] = useState<CostEntry[]>([]);
+  const [codeViewer, setCodeViewer] = useState<CodeViewerState | null>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -197,6 +215,7 @@ export function App() {
 
     if (!response.ok || !payload.ok || !payload.targetPath) {
       setValidatedPath("");
+      setCodeViewer(null);
       addTranscript("error", payload.error || "Codebase path is invalid.");
       return;
     }
@@ -204,6 +223,7 @@ export function App() {
     setValidatedPath(payload.targetPath);
     setConversation(null);
     setCostEntries([]);
+    setCodeViewer(null);
     addTranscript("status", `Using codebase: ${payload.targetPath}`);
   }
 
@@ -258,6 +278,70 @@ export function App() {
       setIsAskingCodex(false);
     }
   }
+
+  const openFileReference = useCallback(
+    async (reference: FileReference) => {
+      if (!validatedPath) {
+        setCodeViewer({
+          requestedPath: reference.filePath,
+          displayPath: reference.filePath,
+          content: "",
+          targetLine: reference.line,
+          loading: false,
+          error: "Validate a codebase before opening file references."
+        });
+        return;
+      }
+
+      setCodeViewer({
+        requestedPath: reference.filePath,
+        displayPath: reference.filePath,
+        content: "",
+        targetLine: reference.line,
+        loading: true
+      });
+
+      try {
+        const response = await fetch("/api/codebase/file", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targetPath: validatedPath,
+            filePath: reference.filePath
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(await readResponseError(response));
+        }
+
+        const payload = (await response.json()) as {
+          ok: true;
+          filePath: string;
+          relativePath: string;
+          content: string;
+        };
+
+        setCodeViewer({
+          requestedPath: reference.filePath,
+          displayPath: payload.relativePath || payload.filePath,
+          content: payload.content,
+          targetLine: reference.line,
+          loading: false
+        });
+      } catch (error) {
+        setCodeViewer({
+          requestedPath: reference.filePath,
+          displayPath: reference.filePath,
+          content: "",
+          targetLine: reference.line,
+          loading: false,
+          error: error instanceof Error ? error.message : "File could not be opened."
+        });
+      }
+    },
+    [validatedPath]
+  );
 
   async function connectVoice() {
     if (!validatedPath || voiceState !== "idle") {
@@ -452,7 +536,7 @@ export function App() {
   return (
     <main className="app-shell">
       <audio ref={audioRef} autoPlay />
-      <section className="workspace">
+      <section className={`workspace ${codeViewer ? "with-code-viewer" : ""}`}>
         <aside className="control-panel" aria-label="Question controls">
           <div className="brand-row">
             <div>
@@ -647,7 +731,7 @@ export function App() {
                     <time>{item.createdAt}</time>
                   </div>
                   {item.role === "assistant" ? (
-                    <MarkdownContent text={item.text} />
+                    <MarkdownContent text={item.text} onOpenFileReference={openFileReference} />
                   ) : (
                     <pre className="message-plain">{item.text}</pre>
                   )}
@@ -656,6 +740,10 @@ export function App() {
             )}
           </div>
         </section>
+
+        {codeViewer ? (
+          <CodeViewerPanel viewer={codeViewer} onClose={() => setCodeViewer(null)} />
+        ) : null}
       </section>
     </main>
   );
@@ -689,11 +777,114 @@ function getActivityLabel(activity: VoiceActivity): string {
   return "Voice is idle";
 }
 
-function MarkdownContent({ text }: { text: string }) {
+function MarkdownContent({
+  text,
+  onOpenFileReference
+}: {
+  text: string;
+  onOpenFileReference: (reference: FileReference) => void;
+}) {
   return (
     <div className="markdown-body">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a({ href, children, ...props }) {
+            const fileReference = parseMarkdownFileReference(href);
+
+            if (fileReference) {
+              return (
+                <button
+                  className="markdown-file-link"
+                  type="button"
+                  onClick={() => onOpenFileReference(fileReference)}
+                >
+                  {children}
+                </button>
+              );
+            }
+
+            return (
+              <a href={href} {...props}>
+                {children}
+              </a>
+            );
+          }
+        }}
+      >
+        {text}
+      </ReactMarkdown>
     </div>
+  );
+}
+
+function CodeViewerPanel({
+  viewer,
+  onClose
+}: {
+  viewer: CodeViewerState;
+  onClose: () => void;
+}) {
+  const targetLineRef = useRef<HTMLDivElement | null>(null);
+  const highlightedLines = useMemo(() => {
+    const language = getLanguageForPath(viewer.displayPath || viewer.requestedPath);
+
+    return viewer.content.split(/\r?\n/).map((line, index) => ({
+      number: index + 1,
+      html: highlightCodeLine(line, language)
+    }));
+  }, [viewer.content, viewer.displayPath, viewer.requestedPath]);
+
+  useEffect(() => {
+    if (viewer.loading || viewer.error) {
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      targetLineRef.current?.scrollIntoView({ block: "center" });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [viewer.content, viewer.error, viewer.loading, viewer.targetLine]);
+
+  return (
+    <aside className="code-viewer-panel" aria-label="File viewer">
+      <div className="code-viewer-header">
+        <div>
+          <span>File</span>
+          <strong>{viewer.displayPath}</strong>
+        </div>
+        <button className="icon-button" type="button" onClick={onClose} title="Close file viewer">
+          <X size={18} />
+        </button>
+      </div>
+
+      {viewer.loading ? (
+        <div className="code-viewer-state">Loading file...</div>
+      ) : viewer.error ? (
+        <div className="code-viewer-state error">{viewer.error}</div>
+      ) : (
+        <div className="code-viewer-code" role="region" aria-label={`${viewer.displayPath} source`}>
+          {highlightedLines.map((line) => {
+            const isTargetLine = line.number === viewer.targetLine;
+
+            return (
+              <div
+                key={line.number}
+                ref={isTargetLine ? targetLineRef : undefined}
+                className={`code-viewer-line${isTargetLine ? " target" : ""}`}
+              >
+                <span className="code-viewer-line-number">{line.number}</span>
+                <code
+                  className="hljs"
+                  dangerouslySetInnerHTML={{ __html: line.html }}
+                />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </aside>
   );
 }
 
@@ -798,6 +989,129 @@ function parseSseBlock(block: string): { event: string; data: string } | undefin
   }
 
   return { event, data: dataLines.join("\n") };
+}
+
+async function readResponseError(response: Response): Promise<string> {
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    const payload = (await response.json()) as { error?: string };
+    return payload.error || response.statusText;
+  }
+
+  return (await response.text()) || response.statusText;
+}
+
+function parseMarkdownFileReference(href: string | undefined): FileReference | undefined {
+  if (!href) {
+    return undefined;
+  }
+
+  const decodedHref = decodeHref(href).trim();
+
+  if (!decodedHref || decodedHref.includes("\n") || decodedHref.startsWith("#")) {
+    return undefined;
+  }
+
+  const lineMatch = decodedHref.match(/^(.+):([1-9]\d*)(?::\d+)?$/);
+
+  if (!lineMatch) {
+    return undefined;
+  }
+
+  const filePath = lineMatch[1].trim();
+
+  if (!filePath || hasUrlScheme(filePath)) {
+    return undefined;
+  }
+
+  return {
+    filePath,
+    line: Number(lineMatch[2])
+  };
+}
+
+function decodeHref(href: string): string {
+  try {
+    return decodeURIComponent(href);
+  } catch {
+    return href;
+  }
+}
+
+function hasUrlScheme(value: string): boolean {
+  return /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value);
+}
+
+const languageByExtension: Record<string, string> = {
+  bash: "bash",
+  c: "c",
+  cc: "cpp",
+  cpp: "cpp",
+  cs: "csharp",
+  css: "css",
+  diff: "diff",
+  go: "go",
+  h: "c",
+  hpp: "cpp",
+  html: "xml",
+  java: "java",
+  js: "javascript",
+  json: "json",
+  jsx: "javascript",
+  kt: "kotlin",
+  md: "markdown",
+  mjs: "javascript",
+  php: "php",
+  py: "python",
+  rb: "ruby",
+  rs: "rust",
+  scss: "scss",
+  sh: "bash",
+  sql: "sql",
+  swift: "swift",
+  toml: "ini",
+  ts: "typescript",
+  tsx: "typescript",
+  xml: "xml",
+  yaml: "yaml",
+  yml: "yaml",
+  zsh: "bash"
+};
+
+function getLanguageForPath(filePath: string): string | undefined {
+  const fileName = filePath.split(/[\\/]/).pop()?.toLowerCase() ?? "";
+
+  if (fileName === "dockerfile") {
+    return "dockerfile";
+  }
+
+  if (fileName === "makefile") {
+    return "makefile";
+  }
+
+  const extension = fileName.split(".").pop() ?? "";
+  return languageByExtension[extension];
+}
+
+function highlightCodeLine(line: string, language: string | undefined): string {
+  if (!language || !hljs.getLanguage(language)) {
+    return escapeHtml(line || " ");
+  }
+
+  try {
+    return hljs.highlight(line || " ", { language, ignoreIllegals: true }).value;
+  } catch {
+    return escapeHtml(line || " ");
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 function extractToolCall(event: Record<string, unknown>): PendingToolCall | undefined {
