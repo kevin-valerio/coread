@@ -7,9 +7,11 @@ import {
   HelpCircle,
   Mic,
   MicOff,
+  Moon,
   Play,
   RefreshCw,
   Square,
+  Sun,
   X
 } from "lucide-react";
 import hljs from "highlight.js";
@@ -179,6 +181,7 @@ export function App() {
   const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false);
   const [isGradingQuiz, setIsGradingQuiz] = useState(false);
   const [quizError, setQuizError] = useState("");
+  const [darkMode, setDarkMode] = useState(false);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -214,6 +217,13 @@ export function App() {
         "--code-viewer-width": `${codeViewerWidth}px`
       } as CSSProperties)
     : undefined;
+  const appShellClassName = [
+    "app-shell",
+    darkMode ? "dark-mode" : "",
+    codeViewer ? "with-code-viewer-shell" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   useEffect(() => {
     quizQuestionsRef.current = quizQuestions;
@@ -1057,7 +1067,7 @@ export function App() {
   }, []);
 
   return (
-    <main className={`app-shell ${codeViewer ? "with-code-viewer-shell" : ""}`}>
+    <main className={appShellClassName}>
       <audio ref={audioRef} autoPlay />
       <section className={`workspace ${codeViewer ? "with-code-viewer" : ""}`} style={workspaceStyle}>
         <aside className="control-panel" aria-label="Question controls">
@@ -1065,6 +1075,16 @@ export function App() {
             <div>
               <h1>coread</h1>
             </div>
+            <button
+              className="icon-button theme-toggle"
+              type="button"
+              onClick={() => setDarkMode((enabled) => !enabled)}
+              title={darkMode ? "Use light mode" : "Use dark mode"}
+              aria-label={darkMode ? "Use light mode" : "Use dark mode"}
+              aria-pressed={darkMode}
+            >
+              {darkMode ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
           </div>
 
           <label className="field">

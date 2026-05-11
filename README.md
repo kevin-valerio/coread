@@ -5,6 +5,7 @@ Local voice app for codebase questions.
 The browser connects to `gpt-realtime-2` through a local Express server. The Realtime model can call an `ask_codex` tool, and the server runs `codex exec` against the selected local codebase. Follow-up questions reuse the same Codex session with `codex exec resume`.
 
 Questions are voice-only from the microphone. The UI shows animated voice state, shows when Codex is running, then displays the final assistant output with Markdown rendering. It lets the user choose Codex reasoning amount, preview and select a Realtime voice, choose voice speed, add extra voice instructions, and track live API cost.
+The UI starts in light mode and has a small header button to switch dark mode on or off.
 
 The Quiz tab asks Codex to propose codebase components, then generates a configurable set of questions for the selected component or the whole repo. The Realtime voice asks each question aloud. If voice is not already connected, the quiz action starts it before asking. After the user answers by voice, the app asks Codex to grade the answer as correct, partial, or incorrect with a score out of 10. The card keeps the Markdown evidence and file references, while the spoken summary avoids file paths and line numbers.
 
