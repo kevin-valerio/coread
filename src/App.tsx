@@ -10,7 +10,6 @@ import {
   Play,
   RefreshCw,
   Square,
-  Volume2,
   X
 } from "lucide-react";
 import hljs from "highlight.js";
@@ -1178,12 +1177,6 @@ export function App() {
                 Stop voice
               </button>
             )}
-            <div
-              className="voice-meter"
-              aria-label={voiceState === "connected" ? "Voice live" : "Voice off"}
-            >
-              <Volume2 size={18} />
-            </div>
           </div>
 
           <div className={`activity-card ${activity}`} aria-live="polite">

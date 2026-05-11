@@ -318,7 +318,7 @@ textarea:focus {
 
 .voice-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px;
+  grid-template-columns: 1fr;
   gap: 8px;
   align-items: center;
 }
@@ -347,18 +347,6 @@ textarea:focus {
   border-color: #9d3828;
   color: #ffffff;
   background: #9d3828;
-}
-
-.voice-meter {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 40px;
-  padding: 0;
-  border: 1px solid #d6d0c4;
-  border-radius: 6px;
-  color: #484137;
-  background: #f6f1e7;
 }
 
 .activity-card {
