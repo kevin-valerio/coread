@@ -1196,17 +1196,17 @@ export function App() {
           <div className="cost-card" aria-live="polite">
             <div className="cost-card-header">
               <div>
-                <span className="activity-eyebrow">API cost</span>
-                <strong>{formatUsd(costSummary.totalUsd)}</strong>
+                <span className="cost-grid">API cost</span>
+				  {formatUsd(costSummary.totalUsd)}
               </div>
               <span>Checked {pricingMetadata.checkedAt}</span>
             </div>
 
             <div className="cost-grid">
               <span>Realtime</span>
-              <strong>{formatUsd(costSummary.realtimeUsd)}</strong>
+              {formatUsd(costSummary.realtimeUsd)}
               <span>Codex</span>
-              <strong>{formatUsd(costSummary.codexUsd)}</strong>
+              {formatUsd(costSummary.codexUsd)}
               {costSummary.totalCredits > 0 ? (
                 <>
                   <span>Codex credits</span>
@@ -1236,8 +1236,6 @@ export function App() {
           </div>
 
           <div className="session-meta">
-            <span>Codebase</span>
-            <strong>{validatedPath || "Not selected"}</strong>
             <span>Codex session</span>
             <strong>{conversation?.codexSessionId || "Created after first question"}</strong>
           </div>

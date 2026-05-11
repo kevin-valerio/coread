@@ -1,7 +1,5 @@
 # AGENTS.md
 
-This app is a local voice codebase Q&A harness.
-
 The goal is to let a user pick a local codebase, ask questions by voice, and receive a real-time spoken answer plus a text transcript with file and line references.
 
 The first implementation uses `gpt-realtime-2` for the live voice session and `codex exec` as the local investigation worker. Follow-up turns must reuse the same Codex session with `codex exec resume` so the review stays contextual inside one topic conversation.
