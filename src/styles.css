@@ -65,7 +65,7 @@ button:disabled {
 
 .review-panel {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr;
   min-width: 0;
 }
 
@@ -344,20 +344,6 @@ textarea:focus {
   line-height: 1.5;
 }
 
-.question-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 48px;
-  gap: 10px;
-  padding: 16px 24px 22px;
-  border-top: 1px solid #ded9cf;
-}
-
-.send-button {
-  align-self: stretch;
-  width: 48px;
-  height: auto;
-}
-
 @media (max-width: 960px) {
   .app-shell {
     padding: 12px;
@@ -380,8 +366,7 @@ textarea:focus {
 @media (max-width: 560px) {
   .brand-row,
   .transcript-header,
-  .voice-actions,
-  .question-form {
+  .voice-actions {
     grid-template-columns: 1fr;
   }
 
@@ -395,7 +380,6 @@ textarea:focus {
   }
 
   .voice-meter,
-  .send-button,
   .icon-button {
     width: 100%;
   }

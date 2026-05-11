@@ -1,10 +1,9 @@
-import { FormEvent, useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   FolderCheck,
   Mic,
   MicOff,
   Square,
-  Send,
   Volume2
 } from "lucide-react";
 import type { CodexAnswer, CodexReasoningEffort, ConversationRecord, TranscriptItem } from "./types";
@@ -43,7 +42,6 @@ export function App() {
     "When speaking, do not mention file names or line numbers. Keep exact references in the visible Codex output."
   );
   const [conversation, setConversation] = useState<ConversationRecord | null>(null);
-  const [question, setQuestion] = useState("");
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [isAskingCodex, setIsAskingCodex] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
@@ -51,7 +49,6 @@ export function App() {
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const canAsk = Boolean(validatedPath && question.trim() && !isAskingCodex);
   const statusText = useMemo(() => {
     if (!validatedPath) {
       return "Choose a codebase";
@@ -65,7 +62,7 @@ export function App() {
       return "Connecting voice";
     }
 
-    return "Text questions ready";
+    return "Voice ready";
   }, [validatedPath, voiceState]);
 
   const addTranscript = useCallback((role: TranscriptItem["role"], text: string) => {
@@ -177,24 +174,6 @@ export function App() {
       return payload;
     } finally {
       setIsAskingCodex(false);
-    }
-  }
-
-  async function submitTextQuestion(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!canAsk) {
-      return;
-    }
-
-    const text = question.trim();
-    setQuestion("");
-    addTranscript("user", text);
-
-    try {
-      await askCodex(text);
-    } catch (error) {
-      addTranscript("error", error instanceof Error ? error.message : "Codex request failed.");
     }
   }
 
@@ -443,7 +422,7 @@ export function App() {
           <div className="transcript-list">
             {transcript.length === 0 ? (
               <div className="empty-state">
-                <p>Validate a codebase, then ask a question.</p>
+                <p>Validate a codebase, then start voice.</p>
               </div>
             ) : (
               transcript.map((item) => (
@@ -457,17 +436,6 @@ export function App() {
               ))
             )}
           </div>
-
-          <form className="question-form" onSubmit={submitTextQuestion}>
-            <textarea
-              value={question}
-              onChange={(event) => setQuestion(event.target.value)}
-              placeholder="Ask a codebase question. Example: where can untrusted input reach file system writes?"
-            />
-            <button className="icon-button send-button" type="submit" disabled={!canAsk} title="Ask Codex">
-              <Send size={18} />
-            </button>
-          </form>
         </section>
       </section>
     </main>

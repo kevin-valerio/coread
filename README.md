@@ -4,7 +4,7 @@ Local voice app for codebase questions.
 
 The browser connects to `gpt-realtime-2` through a local Express server. The Realtime model can call an `ask_codex` tool, and the server runs `codex exec` against the selected local codebase. Follow-up questions reuse the same Codex session with `codex exec resume`.
 
-The UI shows when Codex is running, then displays only the final model output. It lets the user choose Codex reasoning amount, voice speed, and extra voice instructions.
+Questions are voice-only from the microphone. The UI shows when Codex is running, then displays only the final model output. It lets the user choose Codex reasoning amount, voice speed, and extra voice instructions.
 
 Bridge notes are in `docs/codex-bridge-investigation.md`.
 
