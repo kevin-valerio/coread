@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import { askCodex } from "./codexBridge";
 import { createRealtimeSession } from "./realtime";
+import { createVoicePreview } from "./voicePreview";
 import { createConversation, listConversations } from "./store";
 import { resolveDirectory } from "./pathUtils";
 import type { CodexReasoningEffort } from "./types";
@@ -28,6 +29,10 @@ app.post(
 );
 
 app.use(express.json({ limit: "1mb" }));
+
+app.post("/api/voice/preview", (req, res, next) => {
+  createVoicePreview(req, res).catch(next);
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({

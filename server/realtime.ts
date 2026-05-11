@@ -3,12 +3,24 @@ import os from "node:os";
 import type { Request, Response } from "express";
 
 type VoiceSpeed = "slow" | "normal" | "fast" | "very-fast";
+export type RealtimeVoice =
+  | "alloy"
+  | "ash"
+  | "ballad"
+  | "coral"
+  | "echo"
+  | "sage"
+  | "shimmer"
+  | "verse"
+  | "marin"
+  | "cedar";
 
 interface RealtimeSessionInput {
   sdp: string;
   targetPath: string;
   conversationId: string;
   reasoningEffort: string;
+  voice: RealtimeVoice;
   voiceSpeed: VoiceSpeed;
   voiceSystemPrompt: string;
 }
@@ -50,7 +62,30 @@ function normalizeVoiceSpeed(value: string | undefined): VoiceSpeed {
     return value;
   }
 
-  return "fast";
+  return "very-fast";
+}
+
+export function normalizeRealtimeVoice(value: string | undefined): RealtimeVoice | undefined {
+  if (
+    value === "alloy" ||
+    value === "ash" ||
+    value === "ballad" ||
+    value === "coral" ||
+    value === "echo" ||
+    value === "sage" ||
+    value === "shimmer" ||
+    value === "verse" ||
+    value === "marin" ||
+    value === "cedar"
+  ) {
+    return value;
+  }
+
+  return undefined;
+}
+
+function getRealtimeVoice(value: string | undefined): RealtimeVoice {
+  return normalizeRealtimeVoice(value) ?? normalizeRealtimeVoice(process.env.REALTIME_VOICE) ?? "marin";
 }
 
 function getVoiceSpeedInstruction(speed: VoiceSpeed): string {
@@ -80,6 +115,7 @@ function readRealtimeSessionInput(req: Request): RealtimeSessionInput {
   const voiceSpeed = normalizeVoiceSpeed(
     readBodyString(body, "voiceSpeed") ?? readHeader(req.headers["x-voice-speed"])
   );
+  const voice = getRealtimeVoice(readBodyString(body, "voice") ?? readHeader(req.headers["x-realtime-voice"]));
   const voiceSystemPrompt =
     readBodyString(body, "voiceSystemPrompt") ?? readHeader(req.headers["x-voice-system-prompt"]) ?? "";
 
@@ -88,6 +124,7 @@ function readRealtimeSessionInput(req: Request): RealtimeSessionInput {
     targetPath,
     conversationId,
     reasoningEffort,
+    voice,
     voiceSpeed,
     voiceSystemPrompt
   };
@@ -136,9 +173,11 @@ export function buildRealtimeSessionConfig(input: {
   targetPath: string;
   conversationId: string;
   reasoningEffort: string;
+  voice?: string;
   voiceSpeed?: string;
   voiceSystemPrompt?: string;
 }): Record<string, unknown> {
+  const voice = getRealtimeVoice(input.voice);
   const voiceSpeed = normalizeVoiceSpeed(input.voiceSpeed);
   const customPrompt = input.voiceSystemPrompt?.trim();
   const instructions = [
@@ -168,7 +207,7 @@ export function buildRealtimeSessionConfig(input: {
     },
     audio: {
       output: {
-        voice: process.env.REALTIME_VOICE || "marin"
+        voice
       }
     },
     tools: [

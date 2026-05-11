@@ -1,3 +1,5 @@
+import type { CodexUsageRecord } from "../shared/cost";
+
 export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface ConversationRecord {
@@ -30,4 +32,5 @@ export interface CodexAnswer {
   answer: string;
   durationMs: number;
   outputFile: string;
+  usage?: CodexUsageRecord;
 }

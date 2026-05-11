@@ -13,7 +13,7 @@ The app must support follow-up questions inside one conversation. A single codeb
 1. The user starts the local web app.
 2. The user enters a local codebase path.
 3. The local server validates that the path exists and is a directory.
-4. The user chooses Codex reasoning amount, voice speed, and optional voice instructions.
+4. The user chooses Codex reasoning amount, previews and selects a Realtime voice, chooses voice speed, and optional voice instructions.
 5. The user starts voice.
 6. The browser opens a WebRTC session to `gpt-realtime-2` through the local server.
 7. The user asks a question by microphone.
@@ -22,6 +22,7 @@ The app must support follow-up questions inside one conversation. A single codeb
 10. The local server runs `codex exec` against the selected codebase.
 11. The browser returns the Codex result to the Realtime session.
 12. The Realtime model speaks a concise answer and the UI stores the text transcript.
+13. The UI updates cost totals when Realtime or Codex reports token usage.
 
 ## Follow-Up Context
 
@@ -65,7 +66,8 @@ The local server receives the SDP plus local session settings:
   "targetPath": "/Users/example/project",
   "conversationId": "local-conversation-id",
   "reasoningEffort": "medium",
-  "voiceSpeed": "fast",
+  "voice": "marin",
+  "voiceSpeed": "very-fast",
   "voiceSystemPrompt": "Answer in very short bullets."
 }
 ```
@@ -87,9 +89,13 @@ The local server forwards the SDP to the OpenAI Realtime API with a session conf
 
 The local server returns the SDP answer to the browser.
 
-Voice speed is currently implemented as Realtime instruction text because the checked public Realtime WebRTC docs do not expose a stable speech-speed field for this session shape.
+Voice speed defaults to Very Fast and is currently implemented as Realtime instruction text because the checked public Realtime WebRTC docs do not expose a stable speech-speed field for this session shape.
+
+Voice previews use `POST /api/voice/preview`. The local server calls the OpenAI speech endpoint with `gpt-4o-mini-tts`, so the API key stays server-side.
 
 The voice is instructed not to say file names, paths, or line numbers aloud. Exact references stay in the visible Codex output.
+
+Realtime cost is calculated from `response.done`. The app uses text, audio, image, cached input, and output token details when they are present. If a response does not include enough detail to price safely, the tokens are counted as unpriced.
 
 ## Codex Tool Contract
 
@@ -108,7 +114,7 @@ Arguments:
 }
 ```
 
-The browser also sends the selected Codex reasoning amount to the local server request.
+The browser also sends the selected Codex reasoning amount to the local server request. The stream sends structured `usage` progress events when Codex reports token usage. The UI prices those events with the shared calculator in `shared/cost.ts`.
 
 Result:
 
@@ -151,3 +157,5 @@ Realtime voice requires `OPENAI_API_KEY` in the local server environment.
 Codex must already be installed and authenticated on the machine.
 
 Long Codex investigations can take time. The UI shows a running state while Codex runs, then displays the final model output.
+
+The cost panel is local UI state. It is meant to show the current browser session cost, not a historical billing report.

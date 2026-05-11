@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { CodexAnswer, CodexQuestion, CodexReasoningEffort, ConversationRecord } from "./types";
+import type { CodexUsageRecord } from "../shared/cost";
 import { buildFirstTurnPrompt, buildFollowUpPrompt } from "./prompts";
 import { createConversation, getConversation, updateConversation } from "./store";
 import { resolveDirectory } from "./pathUtils";
@@ -15,11 +16,13 @@ interface CodexRunResult {
   stdout: string;
   stderr: string;
   outputFile: string;
+  usage?: CodexUsageRecord;
 }
 
 export interface CodexProgressEvent {
-  type: "status" | "stdout" | "stderr";
+  type: "status" | "stdout" | "stderr" | "usage";
   text: string;
+  usage?: CodexUsageRecord;
 }
 
 type CodexProgressHandler = (event: CodexProgressEvent) => void;
@@ -146,6 +149,68 @@ export function summarizeCodexJsonLine(line: string): string | undefined {
   return type || undefined;
 }
 
+export function extractCodexModelFromJsonLine(line: string): string | undefined {
+  const parsed = parseJsonLine(line);
+
+  if (!parsed) {
+    return undefined;
+  }
+
+  const event = parsed as Record<string, unknown>;
+  const payload = event.payload as Record<string, unknown> | undefined;
+  const model = event.model ?? payload?.model;
+
+  if (typeof model === "string" && model.trim()) {
+    return model;
+  }
+
+  if (event.type === "turn_context") {
+    const contextModel = payload?.model;
+    return typeof contextModel === "string" && contextModel.trim() ? contextModel : undefined;
+  }
+
+  return undefined;
+}
+
+export function extractCodexUsageFromJsonLine(
+  line: string,
+  model: string | undefined
+): CodexUsageRecord | undefined {
+  const parsed = parseJsonLine(line);
+
+  if (!parsed || typeof parsed !== "object") {
+    return undefined;
+  }
+
+  const event = parsed as Record<string, unknown>;
+
+  if (event.type === "turn.completed") {
+    const usage = readObject(event.usage);
+
+    if (!usage) {
+      return undefined;
+    }
+
+    return buildCodexUsage(usage, readModel(event, model));
+  }
+
+  const payload = readObject(event.payload);
+
+  if (event.type === "event_msg" && payload?.type === "token_count") {
+    const info = readObject(payload.info);
+    const usage = readObject(info?.last_token_usage);
+    const totalUsage = readObject(info?.total_token_usage);
+
+    if (!usage) {
+      return undefined;
+    }
+
+    return buildCodexUsage(usage, readModel(event, model), readNumber(totalUsage?.total_tokens));
+  }
+
+  return undefined;
+}
+
 export async function askCodex(
   input: CodexQuestion,
   onProgress?: CodexProgressHandler
@@ -174,7 +239,8 @@ export async function askCodex(
     codexSessionId: conversation.codexSessionId,
     answer: run.answer,
     durationMs: Date.now() - startedAt,
-    outputFile: run.outputFile
+    outputFile: run.outputFile,
+    usage: run.usage
   };
 }
 
@@ -247,7 +313,7 @@ async function runCodex(
     text: isFirstTurn ? "Starting a new Codex session." : "Resuming the Codex session."
   });
 
-  const { stdout, stderr } = await runProcess(
+  const { stdout, stderr, usage } = await runProcess(
     "codex",
     args,
     prompt,
@@ -260,7 +326,7 @@ async function runCodex(
     throw new Error(`Codex returned no answer. stderr: ${stderr.slice(-1000)}`);
   }
 
-  return { answer, stdout, stderr, outputFile };
+  return { answer, stdout, stderr, outputFile, usage };
 }
 
 function getReasoningEffort(value: CodexReasoningEffort | undefined): CodexReasoningEffort {
@@ -273,7 +339,7 @@ function runProcess(
   stdin: string,
   cwd: string,
   onProgress?: CodexProgressHandler
-): Promise<{ stdout: string; stderr: string }> {
+): Promise<{ stdout: string; stderr: string; usage?: CodexUsageRecord }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
@@ -285,6 +351,9 @@ function runProcess(
     let stderr = "";
     let stdoutBuffer = "";
     let stderrBuffer = "";
+    let currentModel: string | undefined;
+    let lastUsage: CodexUsageRecord | undefined;
+    const emittedUsageKeys = new Set<string>();
     let settled = false;
 
     const timer = setTimeout(() => {
@@ -300,10 +369,22 @@ function runProcess(
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
       stdoutBuffer = emitCompleteLines(stdoutBuffer + chunk, (line) => {
+        currentModel = extractCodexModelFromJsonLine(line) ?? currentModel;
         const text = summarizeCodexJsonLine(line);
+        const usage = extractCodexUsageFromJsonLine(line, currentModel);
 
         if (text) {
           onProgress?.({ type: "stdout", text });
+        }
+
+        if (usage) {
+          const usageKey = getCodexUsageKey(usage);
+
+          if (!emittedUsageKeys.has(usageKey)) {
+            emittedUsageKeys.add(usageKey);
+            lastUsage = usage;
+            onProgress?.({ type: "usage", text: "Codex token usage updated.", usage });
+          }
         }
       });
     });
@@ -334,10 +415,22 @@ function runProcess(
 
       if (code === 0) {
         flushLineBuffer(stdoutBuffer, (line) => {
+          currentModel = extractCodexModelFromJsonLine(line) ?? currentModel;
           const text = summarizeCodexJsonLine(line);
+          const usage = extractCodexUsageFromJsonLine(line, currentModel);
 
           if (text) {
             onProgress?.({ type: "stdout", text });
+          }
+
+          if (usage) {
+            const usageKey = getCodexUsageKey(usage);
+
+            if (!emittedUsageKeys.has(usageKey)) {
+              emittedUsageKeys.add(usageKey);
+              lastUsage = usage;
+              onProgress?.({ type: "usage", text: "Codex token usage updated.", usage });
+            }
           }
         });
         flushLineBuffer(stderrBuffer, (line) => {
@@ -347,7 +440,7 @@ function runProcess(
             onProgress?.({ type: "stderr", text });
           }
         });
-        resolve({ stdout, stderr });
+        resolve({ stdout, stderr, usage: lastUsage });
       } else {
         reject(new Error(`Codex exited with code ${code}. stderr: ${stderr.slice(-2000)}`));
       }
@@ -355,6 +448,70 @@ function runProcess(
 
     child.stdin.end(stdin);
   });
+}
+
+function parseJsonLine(line: string): unknown | undefined {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+}
+
+function buildCodexUsage(
+  usage: Record<string, unknown>,
+  model: string,
+  cumulativeTotalTokens = 0
+): CodexUsageRecord | undefined {
+  const inputTokens = readNumber(usage.input_tokens);
+  const outputTokens = readNumber(usage.output_tokens);
+  const totalTokens = readNumber(usage.total_tokens) || inputTokens + outputTokens;
+
+  if (inputTokens === 0 && outputTokens === 0 && totalTokens === 0) {
+    return undefined;
+  }
+
+  return {
+    source: "codex",
+    model,
+    inputTokens,
+    cachedInputTokens: readNumber(usage.cached_input_tokens),
+    outputTokens,
+    reasoningOutputTokens: readNumber(usage.reasoning_output_tokens),
+    totalTokens,
+    cumulativeTotalTokens: cumulativeTotalTokens || undefined
+  };
+}
+
+function readModel(event: Record<string, unknown>, fallback: string | undefined): string {
+  const payload = readObject(event.payload);
+  const eventModel = event.model ?? payload?.model;
+
+  return typeof eventModel === "string" && eventModel.trim() ? eventModel : fallback ?? "unknown";
+}
+
+function readObject(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function readNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function getCodexUsageKey(usage: CodexUsageRecord): string {
+  return [
+    usage.model,
+    usage.inputTokens,
+    usage.cachedInputTokens,
+    usage.outputTokens,
+    usage.reasoningOutputTokens,
+    usage.totalTokens,
+    usage.cumulativeTotalTokens ?? ""
+  ].join(":");
 }
 
 function emitCompleteLines(buffer: string, onLine: (line: string) => void): string {

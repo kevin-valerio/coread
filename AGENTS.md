@@ -16,7 +16,7 @@ The user selects a local folder in the UI. A browser cannot safely expose a real
 
 The user can choose Codex reasoning amount before asking a question. Pass this through to Codex as `model_reasoning_effort`.
 
-The user can choose voice speed and provide an extra voice system prompt. Voice speed is passed as Realtime instruction text.
+The user can preview and choose Realtime voice, choose voice speed, and provide an extra voice system prompt. Voice speed is passed as Realtime instruction text.
 
 This app is for codebase questions and investigation. Codex should not edit files. Run Codex with read-only intent and read-only sandboxing where the CLI supports it.
 
@@ -35,6 +35,12 @@ Prefer small mechanical checks:
 1. Typecheck
 2. Unit tests for parsing and bridge logic
 3. Manual browser check for the local UI
+
+If you need to use the Google Chrome MCP browser, restart Chrome with:
+
+```bash
+open -na 'Google Chrome' --args --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-devtools-mcp-profile --no-first-run --no-default-browser-check about:blank
+```
 
 Make logs inspectable. When an agent calls another agent, keep enough local trace data to debug what happened without guessing.
 

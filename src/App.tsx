@@ -3,10 +3,27 @@ import {
   FolderCheck,
   Mic,
   MicOff,
+  Play,
   Square,
   Volume2
 } from "lucide-react";
-import type { CodexAnswer, CodexReasoningEffort, ConversationRecord, TranscriptItem } from "./types";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import {
+  calculateCodexCost,
+  calculateRealtimeCost,
+  extractRealtimeUsageFromEvent,
+  pricingMetadata,
+  summarizeCostEntries
+} from "../shared/cost";
+import type { CostCalculation, CostEntry } from "../shared/cost";
+import type {
+  CodexAnswer,
+  CodexProgressEvent,
+  CodexReasoningEffort,
+  ConversationRecord,
+  TranscriptItem
+} from "./types";
 
 const reasoningOptions: Array<{ value: CodexReasoningEffort; label: string }> = [
   { value: "minimal", label: "Minimal" },
@@ -16,16 +33,47 @@ const reasoningOptions: Array<{ value: CodexReasoningEffort; label: string }> = 
   { value: "xhigh", label: "Extra high" }
 ];
 
+type RealtimeVoice =
+  | "alloy"
+  | "ash"
+  | "ballad"
+  | "coral"
+  | "echo"
+  | "sage"
+  | "shimmer"
+  | "verse"
+  | "marin"
+  | "cedar";
 type VoiceSpeed = "slow" | "normal" | "fast" | "very-fast";
+
+const voiceOptions: Array<{ value: RealtimeVoice; label: string }> = [
+  { value: "marin", label: "Marin" },
+  { value: "cedar", label: "Cedar" },
+  { value: "alloy", label: "Alloy" },
+  { value: "ash", label: "Ash" },
+  { value: "ballad", label: "Ballad" },
+  { value: "coral", label: "Coral" },
+  { value: "echo", label: "Echo" },
+  { value: "sage", label: "Sage" },
+  { value: "shimmer", label: "Shimmer" },
+  { value: "verse", label: "Verse" }
+];
 
 const voiceSpeedOptions: Array<{ value: VoiceSpeed; label: string }> = [
   { value: "slow", label: "Slow" },
   { value: "normal", label: "Normal" },
   { value: "fast", label: "Fast" },
-  { value: "very-fast", label: "Very fast" }
+  { value: "very-fast", label: "Very Fast" }
 ];
 
 type VoiceState = "idle" | "connecting" | "connected";
+type VoiceActivity = "idle" | "connecting" | "waiting" | "listening" | "thinking" | "speaking" | "researching";
+
+const defaultVoiceSystemPrompt = [
+  "- When speaking, do not mention file names or line numbers.",
+  "- Keep exact references in the visible Codex output.",
+  "- Use simple English, go straight to the point. Don't be fluffy."
+].join("\n");
 
 interface PendingToolCall {
   callId: string;
@@ -37,33 +85,39 @@ export function App() {
   const [targetPath, setTargetPath] = useState("~/Desktop");
   const [validatedPath, setValidatedPath] = useState("");
   const [reasoningEffort, setReasoningEffort] = useState<CodexReasoningEffort>("medium");
-  const [voiceSpeed, setVoiceSpeed] = useState<VoiceSpeed>("fast");
-  const [voiceSystemPrompt, setVoiceSystemPrompt] = useState(
-    "When speaking, do not mention file names or line numbers. Keep exact references in the visible Codex output."
-  );
+  const [voice, setVoice] = useState<RealtimeVoice>("marin");
+  const [voiceSpeed, setVoiceSpeed] = useState<VoiceSpeed>("very-fast");
+  const [voiceSystemPrompt, setVoiceSystemPrompt] = useState(defaultVoiceSystemPrompt);
   const [conversation, setConversation] = useState<ConversationRecord | null>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const [voiceActivity, setVoiceActivity] = useState<VoiceActivity>("idle");
+  const [isPreviewingVoice, setIsPreviewingVoice] = useState(false);
   const [isAskingCodex, setIsAskingCodex] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
+  const [costEntries, setCostEntries] = useState<CostEntry[]>([]);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  const statusText = useMemo(() => {
-    if (!validatedPath) {
-      return "Choose a codebase";
-    }
-
-    if (voiceState === "connected") {
-      return "Voice connected";
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
+  const activity = useMemo<VoiceActivity>(() => {
+    if (isAskingCodex) {
+      return "researching";
     }
 
     if (voiceState === "connecting") {
-      return "Connecting voice";
+      return "connecting";
     }
 
-    return "Voice ready";
-  }, [validatedPath, voiceState]);
+    if (voiceState === "connected") {
+      return voiceActivity === "idle" ? "waiting" : voiceActivity;
+    }
+
+    return "idle";
+  }, [isAskingCodex, voiceActivity, voiceState]);
+  const activityLabel = getActivityLabel(activity);
+  const costSummary = useMemo(() => summarizeCostEntries(costEntries), [costEntries]);
+  const latestCostEntries = useMemo(() => costEntries.slice(-3).reverse(), [costEntries]);
 
   const addTranscript = useCallback((role: TranscriptItem["role"], text: string) => {
     setTranscript((items) => [
@@ -75,6 +129,18 @@ export function App() {
         createdAt: new Date().toLocaleTimeString()
       }
     ]);
+  }, []);
+
+  const stopVoicePreview = useCallback(() => {
+    previewAudioRef.current?.pause();
+    previewAudioRef.current = null;
+
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+
+    setIsPreviewingVoice(false);
   }, []);
 
   const appendAssistantDelta = useCallback((text: string) => {
@@ -110,6 +176,17 @@ export function App() {
     });
   }, []);
 
+  const addCostCalculation = useCallback((calculation: CostCalculation) => {
+    setCostEntries((items) => [
+      ...items,
+      {
+        ...calculation,
+        id: crypto.randomUUID(),
+        createdAt: new Date().toLocaleTimeString()
+      }
+    ]);
+  }, []);
+
   async function validatePath() {
     const response = await fetch("/api/codebase/validate", {
       method: "POST",
@@ -126,6 +203,7 @@ export function App() {
 
     setValidatedPath(payload.targetPath);
     setConversation(null);
+    setCostEntries([]);
     addTranscript("status", `Using codebase: ${payload.targetPath}`);
   }
 
@@ -164,7 +242,11 @@ export function App() {
         throw new Error(await response.text());
       }
 
-      const payload = await readCodexStream(response);
+      const payload = await readCodexStream(response, (event) => {
+        if (event.usage) {
+          addCostCalculation(calculateCodexCost(event.usage));
+        }
+      });
 
       setConversation((current) => {
         const base = current ?? activeConversation;
@@ -204,6 +286,7 @@ export function App() {
       dataChannelRef.current = dataChannel;
       dataChannel.onopen = () => {
         setVoiceState("connected");
+        setVoiceActivity("waiting");
         addTranscript("status", "Voice session connected.");
       };
       dataChannel.onmessage = (event) => {
@@ -223,6 +306,7 @@ export function App() {
           targetPath: validatedPath,
           conversationId: activeConversation.id,
           reasoningEffort,
+          voice,
           voiceSpeed,
           voiceSystemPrompt
         })
@@ -241,12 +325,42 @@ export function App() {
   }
 
   function disconnectVoice() {
+    stopVoicePreview();
     dataChannelRef.current?.close();
     peerRef.current?.getSenders().forEach((sender) => sender.track?.stop());
     peerRef.current?.close();
     dataChannelRef.current = null;
     peerRef.current = null;
     setVoiceState("idle");
+    setVoiceActivity("idle");
+  }
+
+  async function previewVoice() {
+    stopVoicePreview();
+    setIsPreviewingVoice(true);
+
+    try {
+      const response = await fetch("/api/voice/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voice })
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const audioUrl = URL.createObjectURL(await response.blob());
+      const audio = new Audio(audioUrl);
+      previewUrlRef.current = audioUrl;
+      previewAudioRef.current = audio;
+      audio.onended = stopVoicePreview;
+      audio.onerror = stopVoicePreview;
+      await audio.play();
+    } catch (error) {
+      stopVoicePreview();
+      addTranscript("error", error instanceof Error ? error.message : "Voice preview failed.");
+    }
   }
 
   async function handleRealtimeEvent(raw: string, activeConversation: ConversationRecord) {
@@ -258,6 +372,17 @@ export function App() {
       if (transcriptText) {
         addTranscript("user", transcriptText);
       }
+      setVoiceActivity("thinking");
+      return;
+    }
+
+    if (type === "input_audio_buffer.speech_started") {
+      setVoiceActivity("listening");
+      return;
+    }
+
+    if (type === "input_audio_buffer.speech_stopped") {
+      setVoiceActivity("thinking");
       return;
     }
 
@@ -268,13 +393,21 @@ export function App() {
     ) {
       const delta = String(event.delta ?? "");
       if (delta) {
+        setVoiceActivity("speaking");
         appendAssistantDelta(delta);
       }
       return;
     }
 
     if (type === "response.done") {
+      const usage = extractRealtimeUsageFromEvent(event);
+
+      if (usage) {
+        addCostCalculation(calculateRealtimeCost(usage));
+      }
+
       finishAssistantStream();
+      setVoiceActivity("waiting");
       return;
     }
 
@@ -323,10 +456,8 @@ export function App() {
         <aside className="control-panel" aria-label="Question controls">
           <div className="brand-row">
             <div>
-              <p className="eyebrow">Local voice Q&amp;A</p>
               <h1>Realtime Codex Reviewer</h1>
             </div>
-            <span className={`state-pill ${voiceState}`}>{statusText}</span>
           </div>
 
           <label className="field">
@@ -343,32 +474,63 @@ export function App() {
             </div>
           </label>
 
-          <label className="field">
-            <span>Codex reasoning</span>
-            <select
-              value={reasoningEffort}
-              onChange={(event) => setReasoningEffort(event.target.value as CodexReasoningEffort)}
-            >
-              {reasoningOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="field-row">
+            <label className="field">
+              <span>Codex reasoning</span>
+              <select
+                value={reasoningEffort}
+                onChange={(event) => setReasoningEffort(event.target.value as CodexReasoningEffort)}
+              >
+                {reasoningOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Voice speed</span>
+              <select
+                value={voiceSpeed}
+                onChange={(event) => setVoiceSpeed(event.target.value as VoiceSpeed)}
+              >
+                {voiceSpeedOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
           <label className="field">
-            <span>Voice speed</span>
-            <select
-              value={voiceSpeed}
-              onChange={(event) => setVoiceSpeed(event.target.value as VoiceSpeed)}
-            >
-              {voiceSpeedOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            <span>Voice</span>
+            <div className="voice-select-row">
+              <select
+                value={voice}
+                onChange={(event) => {
+                  stopVoicePreview();
+                  setVoice(event.target.value as RealtimeVoice);
+                }}
+              >
+                {voiceOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={previewVoice}
+                disabled={isPreviewingVoice}
+                title="Preview voice"
+                aria-label="Preview voice"
+              >
+                <Play size={18} />
+              </button>
+            </div>
           </label>
 
           <label className="field">
@@ -392,9 +554,73 @@ export function App() {
                 Stop voice
               </button>
             )}
-            <div className="voice-meter" aria-label="Voice status">
+            <div
+              className="voice-meter"
+              aria-label={voiceState === "connected" ? "Voice live" : "Voice off"}
+            >
               <Volume2 size={18} />
-              <span>{voiceState === "connected" ? "Live" : "Standby"}</span>
+            </div>
+          </div>
+
+          <div className={`activity-card ${activity}`} aria-live="polite">
+            <div className="activity-visual" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+              <span />
+              <span />
+            </div>
+            <div>
+              <span className="activity-eyebrow">Current state</span>
+              <strong>{activityLabel}</strong>
+            </div>
+          </div>
+
+          <div className="cost-card" aria-live="polite">
+            <div className="cost-card-header">
+              <div>
+                <span className="activity-eyebrow">API cost</span>
+                <strong>{formatUsd(costSummary.totalUsd)}</strong>
+              </div>
+              <span>Checked {pricingMetadata.checkedAt}</span>
+            </div>
+
+            <div className="cost-grid">
+              <span>Realtime</span>
+              <strong>{formatUsd(costSummary.realtimeUsd)}</strong>
+              <span>Codex</span>
+              <strong>{formatUsd(costSummary.codexUsd)}</strong>
+              {costSummary.totalCredits > 0 ? (
+                <>
+                  <span>Codex credits</span>
+                  <strong>{formatCredits(costSummary.totalCredits)}</strong>
+                </>
+              ) : null}
+              <span>Input tokens</span>
+              <strong>{formatTokens(costSummary.inputTokens)}</strong>
+              <span>Cached input</span>
+              <strong>{formatTokens(costSummary.cachedInputTokens)}</strong>
+              <span>Output tokens</span>
+              <strong>{formatTokens(costSummary.outputTokens)}</strong>
+            </div>
+
+            {costSummary.unpricedTokens > 0 ? (
+              <div className="cost-warning">{formatTokens(costSummary.unpricedTokens)} unpriced tokens</div>
+            ) : null}
+
+            <div className="cost-events">
+              {latestCostEntries.length === 0 ? (
+                <span>No usage yet</span>
+              ) : (
+                latestCostEntries.map((entry) => (
+                  <div key={entry.id} className="cost-event">
+                    <span>
+                      {entry.source} · {entry.model}
+                    </span>
+                    <strong>{formatUsd(entry.costUsd)}</strong>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 
@@ -403,17 +629,12 @@ export function App() {
             <strong>{validatedPath || "Not selected"}</strong>
             <span>Codex session</span>
             <strong>{conversation?.codexSessionId || "Created after first question"}</strong>
-            <span>Reasoning</span>
-            <strong>{reasoningOptions.find((option) => option.value === reasoningEffort)?.label}</strong>
-            <span>Voice speed</span>
-            <strong>{voiceSpeedOptions.find((option) => option.value === voiceSpeed)?.label}</strong>
           </div>
         </aside>
 
         <section className="review-panel" aria-label="Question transcript">
           <div className="transcript-header">
             <div>
-              <p className="eyebrow">Transcript</p>
               <h2>Voice and Codex output</h2>
             </div>
             {isAskingCodex ? <span className="busy-dot">Codex running</span> : null}
@@ -431,7 +652,11 @@ export function App() {
                     <span>{item.role}</span>
                     <time>{item.createdAt}</time>
                   </div>
-                  <pre>{item.text}</pre>
+                  {item.role === "assistant" ? (
+                    <MarkdownContent text={item.text} />
+                  ) : (
+                    <pre className="message-plain">{item.text}</pre>
+                  )}
                 </article>
               ))
             )}
@@ -442,7 +667,46 @@ export function App() {
   );
 }
 
-async function readCodexStream(response: Response): Promise<CodexAnswer> {
+function getActivityLabel(activity: VoiceActivity): string {
+  if (activity === "connecting") {
+    return "Connecting voice";
+  }
+
+  if (activity === "waiting") {
+    return "Waiting for you";
+  }
+
+  if (activity === "listening") {
+    return "Listening to you";
+  }
+
+  if (activity === "thinking") {
+    return "Preparing answer";
+  }
+
+  if (activity === "speaking") {
+    return "Voice is speaking";
+  }
+
+  if (activity === "researching") {
+    return "Codex is researching";
+  }
+
+  return "Voice is idle";
+}
+
+function MarkdownContent({ text }: { text: string }) {
+  return (
+    <div className="markdown-body">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
+  );
+}
+
+async function readCodexStream(
+  response: Response,
+  onProgress?: (event: CodexProgressEvent) => void
+): Promise<CodexAnswer> {
   const reader = response.body?.getReader();
 
   if (!reader) {
@@ -471,6 +735,8 @@ async function readCodexStream(response: Response): Promise<CodexAnswer> {
       } else if (event.event === "error") {
         const payload = JSON.parse(event.data) as { error?: string };
         streamError = payload.error || "Codex request failed.";
+      } else if (event.event === "progress") {
+        onProgress?.(JSON.parse(event.data) as CodexProgressEvent);
       }
     }
   }
@@ -482,6 +748,8 @@ async function readCodexStream(response: Response): Promise<CodexAnswer> {
     } else if (event.event === "error") {
       const payload = JSON.parse(event.data) as { error?: string };
       streamError = payload.error || "Codex request failed.";
+    } else if (event.event === "progress") {
+      onProgress?.(JSON.parse(event.data) as CodexProgressEvent);
     }
   }
 
@@ -562,4 +830,40 @@ function extractToolCall(event: Record<string, unknown>): PendingToolCall | unde
   }
 
   return undefined;
+}
+
+function formatUsd(value: number): string {
+  if (value === 0) {
+    return "$0.000000";
+  }
+
+  if (value < 0.000001) {
+    return "<$0.000001";
+  }
+
+  if (value < 0.01) {
+    return `$${value.toFixed(6)}`;
+  }
+
+  if (value < 1) {
+    return `$${value.toFixed(4)}`;
+  }
+
+  return `$${value.toFixed(2)}`;
+}
+
+function formatCredits(value: number): string {
+  if (value < 0.001) {
+    return value.toFixed(6);
+  }
+
+  if (value < 1) {
+    return value.toFixed(3);
+  }
+
+  return value.toFixed(2);
+}
+
+function formatTokens(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
 }
