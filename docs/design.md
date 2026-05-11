@@ -1,6 +1,6 @@
 # Design
 
-This document describes the first local version of Realtime Codex Reviewer.
+This document describes the first local version of coread.
 
 ## Goal
 

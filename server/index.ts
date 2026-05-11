@@ -228,7 +228,7 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 });
 
 app.listen(port, "127.0.0.1", () => {
-  console.log(`Realtime Codex Reviewer server listening on http://127.0.0.1:${port}`);
+  console.log(`coread server listening on http://127.0.0.1:${port}`);
 });
 
 function parseReasoningEffort(value: unknown): CodexReasoningEffort | undefined {

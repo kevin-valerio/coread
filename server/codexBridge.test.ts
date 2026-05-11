@@ -25,12 +25,12 @@ describe("summarizeCodexJsonLine", () => {
       type: "item.completed",
       item: {
         type: "command_execution",
-        aggregated_output: "realtime-codex-reviewer\n",
+        aggregated_output: "coread\n",
         exit_code: 0
       }
     });
 
-    expect(summarizeCodexJsonLine(line)).toContain("realtime-codex-reviewer");
+    expect(summarizeCodexJsonLine(line)).toContain("coread");
   });
 
   it("summarizes turn usage", () => {

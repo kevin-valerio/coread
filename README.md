@@ -1,4 +1,4 @@
-# Realtime Codex Reviewer
+# coread
 
 Local voice app for codebase questions.
 

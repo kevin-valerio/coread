@@ -36,7 +36,7 @@ function getSafetyIdentifier(): string {
 
   return crypto
     .createHash("sha256")
-    .update(`${os.hostname()}:${os.userInfo().username}:realtime-codex-reviewer`)
+    .update(`${os.hostname()}:${os.userInfo().username}:coread`)
     .digest("hex");
 }
 

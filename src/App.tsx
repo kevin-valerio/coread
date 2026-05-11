@@ -1063,7 +1063,7 @@ export function App() {
         <aside className="control-panel" aria-label="Question controls">
           <div className="brand-row">
             <div>
-              <h1>Realtime Codex Reviewer</h1>
+              <h1>coread</h1>
             </div>
           </div>
 

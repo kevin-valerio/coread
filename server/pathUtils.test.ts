@@ -17,7 +17,7 @@ describe("expandUserPath", () => {
 
 describe("resolveFileInsideDirectory", () => {
   it("resolves a relative file inside the root", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "reviewer-root-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "coread-root-"));
     const file = path.join(root, "src", "app.ts");
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, "export const ok = true;\n");
@@ -26,7 +26,7 @@ describe("resolveFileInsideDirectory", () => {
   });
 
   it("allows a file with a dot-dot prefix inside the root", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "reviewer-root-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "coread-root-"));
     const file = path.join(root, "..inside.ts");
     await fs.writeFile(file, "export const ok = true;\n");
 
@@ -34,7 +34,7 @@ describe("resolveFileInsideDirectory", () => {
   });
 
   it("rejects a relative path outside the root", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "reviewer-root-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "coread-root-"));
     const outside = path.join(os.tmpdir(), `outside-${randomUUID()}.ts`);
     await fs.writeFile(outside, "export const bad = true;\n");
 
