@@ -261,6 +261,8 @@ export function App() {
   const quizQuestionsRef = useRef<QuizQuestion[]>([]);
   const activeQuizQuestionIdRef = useRef<string | null>(null);
   const handledToolCallIdsRef = useRef<Set<string>>(new Set());
+  const responseInProgressRef = useRef(false);
+  const pendingAssistantResponseRef = useRef(false);
   const assistantDeltaSourceRef = useRef<string | null>(null);
   const pendingUserTranscriptIdRef = useRef<string | null>(null);
   const validatedPathRef = useRef("");
@@ -599,12 +601,41 @@ export function App() {
     }, microphoneReenableDelayMs);
   }, []);
 
+  const sendAssistantResponseCreate = useCallback((channel: RTCDataChannel) => {
+    responseInProgressRef.current = true;
+    channel.send(JSON.stringify({ type: "response.create" }));
+  }, []);
+
+  const flushPendingAssistantResponse = useCallback(() => {
+    if (!pendingAssistantResponseRef.current || responseInProgressRef.current) {
+      return false;
+    }
+
+    const channel = dataChannelRef.current;
+
+    if (!channel || channel.readyState !== "open") {
+      return false;
+    }
+
+    pendingAssistantResponseRef.current = false;
+    setMicrophoneEnabled(false);
+    sendAssistantResponseCreate(channel);
+    return true;
+  }, [sendAssistantResponseCreate, setMicrophoneEnabled]);
+
   const createAssistantResponse = useCallback(
     (channel: RTCDataChannel) => {
       setMicrophoneEnabled(false);
-      channel.send(JSON.stringify({ type: "response.create" }));
+
+      if (responseInProgressRef.current) {
+        pendingAssistantResponseRef.current = true;
+        return;
+      }
+
+      pendingAssistantResponseRef.current = false;
+      sendAssistantResponseCreate(channel);
     },
-    [setMicrophoneEnabled]
+    [sendAssistantResponseCreate, setMicrophoneEnabled]
   );
 
   const addCostCalculation = useCallback((calculation: CostCalculation) => {
@@ -1256,6 +1287,8 @@ export function App() {
     dataChannelRef.current = null;
     peerRef.current = null;
     pendingUserTranscriptIdRef.current = null;
+    responseInProgressRef.current = false;
+    pendingAssistantResponseRef.current = false;
     setVoiceState("idle");
     setVoiceActivity("idle");
   }
@@ -1294,9 +1327,16 @@ export function App() {
 
     if (type === "error" || type.endsWith("_error")) {
       addTranscript("error", readRealtimeErrorMessage(event));
+      responseInProgressRef.current = false;
+      pendingAssistantResponseRef.current = false;
       assistantDeltaSourceRef.current = null;
       scheduleMicrophoneEnable();
       setVoiceActivity("waiting");
+      return;
+    }
+
+    if (type === "response.created") {
+      responseInProgressRef.current = true;
       return;
     }
 
@@ -1360,13 +1400,8 @@ export function App() {
       return;
     }
 
-    const toolCall = extractToolCall(event);
-
-    if (toolCall) {
-      await answerToolCallOnce(toolCall, activeConversation);
-    }
-
     if (type === "response.done") {
+      responseInProgressRef.current = false;
       const responseDetails = readRealtimeResponseDetails(event);
 
       if (responseDetails) {
@@ -1389,6 +1424,18 @@ export function App() {
         if (question?.status === "asking") {
           updateQuizQuestion(questionId, { status: "listening" });
         }
+      }
+
+      const toolCall = extractToolCall(event);
+
+      if (toolCall) {
+        await answerToolCallOnce(toolCall, activeConversation);
+        flushPendingAssistantResponse();
+        return;
+      }
+
+      if (flushPendingAssistantResponse()) {
+        return;
       }
 
       scheduleMicrophoneEnable();

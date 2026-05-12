@@ -606,6 +606,8 @@ textarea:focus {
 }
 
 .message {
+  align-self: flex-start;
+  max-width: min(100%, 720px);
   border: 1px solid #ddd6ca;
   border-radius: 8px;
   background: #ffffff;
@@ -617,15 +619,8 @@ textarea:focus {
 }
 
 .message.status {
-  align-self: flex-start;
-  max-width: min(100%, 720px);
   border-color: #d4c7a5;
   background: #fff9e8;
-}
-
-.message.assistant {
-  align-self: flex-start;
-  max-width: min(100%, 720px);
 }
 
 .message.error {
@@ -658,13 +653,14 @@ textarea:focus {
   line-height: 1.5;
 }
 
-.message.status .message-top,
-.message.assistant .message-top {
+.message .message-top {
   padding: 6px 8px;
   font-size: 10px;
 }
 
 .message.status .message-plain,
+.message.user .message-plain,
+.message.error .message-plain,
 .message.assistant .markdown-body {
   padding: 7px 8px;
   font-size: 12px;
