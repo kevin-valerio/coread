@@ -7,7 +7,14 @@ import { createRealtimeSession } from "./realtime";
 import { createVoicePreview } from "./voicePreview";
 import { createConversation, listConversations } from "./store";
 import { resolveDirectory, resolveFileInsideDirectory } from "./pathUtils";
-import { getCodebaseOverview, readCodebaseFileExcerpt, searchCodebase } from "./codebaseContext";
+import {
+  findCodebaseFiles,
+  getCodebaseOverview,
+  listCodebaseDirectory,
+  readCodebaseFileExcerpt,
+  runRipgrepCodebase,
+  searchCodebase
+} from "./codebaseContext";
 import {
   generateQuizQuestions,
   gradeQuizAnswer,
@@ -96,6 +103,51 @@ app.post("/api/codebase/search", async (req, res, next) => {
       String(req.body?.targetPath ?? ""),
       String(req.body?.query ?? ""),
       typeof req.body?.maxResults === "number" ? req.body.maxResults : undefined
+    );
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/codebase/files", async (req, res, next) => {
+  try {
+    const result = await findCodebaseFiles(
+      String(req.body?.targetPath ?? ""),
+      String(req.body?.query ?? ""),
+      typeof req.body?.maxResults === "number" ? req.body.maxResults : undefined
+    );
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/codebase/directory", async (req, res, next) => {
+  try {
+    const result = await listCodebaseDirectory(
+      String(req.body?.targetPath ?? ""),
+      typeof req.body?.directoryPath === "string" ? req.body.directoryPath : undefined,
+      typeof req.body?.depth === "number" ? req.body.depth : undefined,
+      typeof req.body?.maxResults === "number" ? req.body.maxResults : undefined
+    );
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/codebase/rg", async (req, res, next) => {
+  try {
+    const result = await runRipgrepCodebase(
+      String(req.body?.targetPath ?? ""),
+      String(req.body?.pattern ?? ""),
+      {
+        searchPathInput: typeof req.body?.searchPath === "string" ? req.body.searchPath : undefined,
+        maxResultsInput: typeof req.body?.maxResults === "number" ? req.body.maxResults : undefined,
+        fixedStringsInput: req.body?.fixedStrings === true,
+        caseSensitiveInput: req.body?.caseSensitive === true
+      }
     );
     res.json({ ok: true, ...result });
   } catch (error) {

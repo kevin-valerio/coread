@@ -2,7 +2,7 @@
 
 The goal is to let a user pick a local codebase, ask questions by voice, and receive a real-time spoken answer plus a text transcript with file and line references.
 
-The current implementation uses `gpt-realtime-2` for the live voice session. Normal codebase questions use fast local overview, search, and read-file tools so the Realtime model can answer directly. `codex exec` remains available for explicit deep passes, bug hunts, and security reviews.
+The current implementation uses `gpt-realtime-2` for the live voice session. Normal codebase questions use fast local overview, file discovery, directory listing, search, ripgrep, and read-file tools so the Realtime model can answer directly. `codex exec` remains available for explicit deep passes, bug hunts, and security reviews.
 
 When Codex is used, follow-up turns must reuse the same Codex session with `codex exec resume` so the review stays contextual inside one topic conversation.
 
@@ -60,7 +60,7 @@ The browser opens a WebRTC session with `gpt-realtime-2`.
 
 The local server creates the Realtime session and registers fast codebase tools plus the slower `ask_codex` tool.
 
-When the Realtime model needs normal codebase evidence, it calls `get_codebase_overview`, `search_codebase`, or `read_codebase_file`.
+When the Realtime model needs normal codebase evidence, it calls `get_codebase_overview`, `find_codebase_files`, `list_codebase_directory`, `search_codebase`, `run_ripgrep`, or `read_codebase_file`.
 
 The browser receives those tool calls over the Realtime data channel, calls the local `/api/codebase/*` endpoints, then returns the result to the Realtime session as `function_call_output`.
 

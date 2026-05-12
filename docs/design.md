@@ -71,8 +71,11 @@ The local server receives the SDP plus local session settings:
   "targetPath": "/Users/example/project",
   "conversationId": "local-conversation-id",
   "reasoningEffort": "low",
+  "realtimeReasoningEffort": "low",
   "voice": "marin",
   "voiceSpeed": "very-fast",
+  "turnDetectionMode": "semantic-auto",
+  "truncationMode": "auto",
   "voiceSystemPrompt": "Answer in very short bullets."
 }
 ```
@@ -83,9 +86,30 @@ The local server forwards the SDP to the OpenAI Realtime API with a session conf
 {
   "type": "realtime",
   "model": "gpt-realtime-2",
+  "reasoning": {
+    "effort": "low"
+  },
+  "truncation": "auto",
+  "audio": {
+    "input": {
+      "turn_detection": {
+        "type": "semantic_vad",
+        "eagerness": "auto",
+        "create_response": true,
+        "interrupt_response": true
+      }
+    },
+    "output": {
+      "voice": "marin",
+      "speed": 1.25
+    }
+  },
   "tools": [
     { "type": "function", "name": "get_codebase_overview" },
+    { "type": "function", "name": "find_codebase_files" },
+    { "type": "function", "name": "list_codebase_directory" },
     { "type": "function", "name": "search_codebase" },
+    { "type": "function", "name": "run_ripgrep" },
     { "type": "function", "name": "read_codebase_file" },
     { "type": "function", "name": "ask_codex" }
   ]
@@ -94,21 +118,30 @@ The local server forwards the SDP to the OpenAI Realtime API with a session conf
 
 The local server returns the SDP answer to the browser.
 
-Voice speed defaults to Very Fast and is currently implemented as Realtime instruction text because the checked public Realtime WebRTC docs do not expose a stable speech-speed field for this session shape.
+Realtime tuning is exposed through compact select controls. The user can choose Realtime reasoning effort, voice speed, turn detection mode, and truncation mode before starting voice.
+
+Voice speed defaults to Very Fast and uses both Realtime `audio.output.speed` and instruction text. The speed field changes playback rate, while the instruction still guides cadence and brevity.
+
+Turn detection defaults to semantic VAD with auto eagerness. This helps the model wait when the user pauses while naming files, paths, symbols, or multi-part codebase questions. The UI can also choose patient or eager semantic VAD, or server VAD for silence-based turns.
+
+Truncation defaults to `auto`. The UI can choose cost-oriented retention settings or disable truncation so an over-long session fails instead of silently dropping old context.
 
 Voice previews use `POST /api/voice/preview`. The local server calls the OpenAI speech endpoint with `gpt-4o-mini-tts`, so the API key stays server-side.
 
 The voice is instructed not to say file names, paths, or line numbers aloud. Exact references can stay in visible text.
 
-Normal codebase Q&A uses three fast local tools:
+Normal codebase Q&A uses fast local tools:
 
 ```text
 get_codebase_overview
+find_codebase_files
+list_codebase_directory
 search_codebase
+run_ripgrep
 read_codebase_file
 ```
 
-`get_codebase_overview` returns a bounded file tree and key README/package/config snippets. `search_codebase` returns exact string matches with file and line numbers. `read_codebase_file` returns a bounded numbered file excerpt.
+`get_codebase_overview` returns a bounded file tree and key README/package/config snippets. `find_codebase_files` searches relative file paths by substring. `list_codebase_directory` lists a bounded directory tree. `search_codebase` returns exact string matches with file and line numbers. `run_ripgrep` runs a bounded `rg` search inside the selected codebase with controlled options. `read_codebase_file` returns a bounded numbered file excerpt.
 
 After Codex finishes, the browser stores the full Codex answer in the transcript but sends Realtime only a compact `spoken_summary` from the `Short version` or `Short answer` paragraph. The voice says that summary or a close paraphrase, then asks at most one short follow-up question.
 
@@ -124,15 +157,49 @@ Tool names:
 
 ```text
 get_codebase_overview
+find_codebase_files
+list_codebase_directory
 search_codebase
+run_ripgrep
 read_codebase_file
 ```
 
-Search arguments:
+File discovery arguments:
+
+```json
+{
+  "query": "auth",
+  "max_results": 20
+}
+```
+
+Directory listing arguments:
+
+```json
+{
+  "directory_path": "server",
+  "depth": 1,
+  "max_results": 80
+}
+```
+
+Exact search arguments:
 
 ```json
 {
   "query": "createRealtimeSession",
+  "max_results": 20
+}
+```
+
+Ripgrep arguments:
+
+```json
+{
+  "pattern": "create.*Session",
+  "search_path": "server",
+  "fixed_strings": false,
+  "case_sensitive": false,
   "max_results": 20
 }
 ```
@@ -151,7 +218,10 @@ The browser handles those tool calls by calling:
 
 ```text
 POST /api/codebase/overview
+POST /api/codebase/files
+POST /api/codebase/directory
 POST /api/codebase/search
+POST /api/codebase/rg
 POST /api/codebase/read
 ```
 

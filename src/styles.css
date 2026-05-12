@@ -226,10 +226,40 @@ h2 {
   gap: 10px;
 }
 
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.settings-grid .field {
+  min-width: 0;
+}
+
 .field > span {
   color: #504b43;
   font-size: 13px;
   font-weight: 700;
+}
+
+.label-with-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.help-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid #aaa193;
+  border-radius: 999px;
+  color: #625b50;
+  font-size: 10px;
+  line-height: 1;
 }
 
 .path-row {
@@ -378,41 +408,24 @@ textarea:focus {
 
 .activity-visual span {
   width: 4px;
-  height: 10px;
+  height: 4px;
   border-radius: 999px;
   background: #8b8172;
-  animation: activity-pulse 1s ease-in-out infinite;
-}
-
-.activity-visual span:nth-child(2) {
-  animation-delay: 0.1s;
-}
-
-.activity-visual span:nth-child(3) {
-  animation-delay: 0.2s;
-}
-
-.activity-visual span:nth-child(4) {
-  animation-delay: 0.3s;
-}
-
-.activity-visual span:nth-child(5) {
-  animation-delay: 0.4s;
+  transition:
+    height 70ms linear,
+    background-color 120ms ease;
 }
 
 .activity-card.idle .activity-visual span {
-  animation: none;
   opacity: 0.45;
 }
 
 .activity-card.waiting .activity-visual span {
   background: #1f6f60;
-  animation-duration: 1.4s;
 }
 
 .activity-card.listening .activity-visual span {
   background: #1f6f60;
-  animation-duration: 0.75s;
 }
 
 .activity-card.thinking .activity-visual span,
@@ -422,12 +435,10 @@ textarea:focus {
 
 .activity-card.speaking .activity-visual span {
   background: #245ca8;
-  animation-duration: 0.55s;
 }
 
 .activity-card.researching .activity-visual span {
   background: #9d3828;
-  animation-duration: 0.45s;
 }
 
 .activity-eyebrow {
@@ -519,17 +530,6 @@ textarea:focus {
   font-weight: 500;
 }
 
-@keyframes activity-pulse {
-  0%,
-  100% {
-    transform: scaleY(0.55);
-  }
-
-  50% {
-    transform: scaleY(1.8);
-  }
-}
-
 .session-meta {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -589,6 +589,11 @@ textarea:focus {
   background: #fff9e8;
 }
 
+.message.assistant {
+  align-self: flex-start;
+  max-width: min(100%, 720px);
+}
+
 .message.error {
   border-color: #dda999;
   background: #fff1ed;
@@ -629,6 +634,12 @@ textarea:focus {
   font-family: inherit;
   font-size: 12px;
   line-height: 1.35;
+}
+
+.transcript-clear-button {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
 }
 
 .markdown-body {
@@ -1304,6 +1315,7 @@ textarea:focus {
   .brand-row,
   .transcript-header,
   .field-row,
+  .settings-grid,
   .voice-select-row,
   .voice-actions,
   .panel-header-actions,

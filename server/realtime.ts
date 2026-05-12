@@ -3,6 +3,14 @@ import os from "node:os";
 import type { Request, Response } from "express";
 
 type VoiceSpeed = "slow" | "normal" | "fast" | "very-fast";
+type RealtimeReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+type TurnDetectionMode =
+  | "semantic-auto"
+  | "semantic-low"
+  | "semantic-high"
+  | "server-balanced"
+  | "server-fast";
+type RealtimeTruncationMode = "auto" | "cost" | "short" | "disabled";
 export type RealtimeVoice =
   | "alloy"
   | "ash"
@@ -20,8 +28,11 @@ interface RealtimeSessionInput {
   targetPath: string;
   conversationId: string;
   reasoningEffort: string;
+  realtimeReasoningEffort: RealtimeReasoningEffort;
   voice: RealtimeVoice;
   voiceSpeed: VoiceSpeed;
+  turnDetectionMode: TurnDetectionMode;
+  truncationMode: RealtimeTruncationMode;
   voiceSystemPrompt: string;
 }
 
@@ -65,6 +76,42 @@ function normalizeVoiceSpeed(value: string | undefined): VoiceSpeed {
   return "very-fast";
 }
 
+function normalizeRealtimeReasoningEffort(value: string | undefined): RealtimeReasoningEffort {
+  if (
+    value === "minimal" ||
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "xhigh"
+  ) {
+    return value;
+  }
+
+  return "low";
+}
+
+function normalizeTurnDetectionMode(value: string | undefined): TurnDetectionMode {
+  if (
+    value === "semantic-auto" ||
+    value === "semantic-low" ||
+    value === "semantic-high" ||
+    value === "server-balanced" ||
+    value === "server-fast"
+  ) {
+    return value;
+  }
+
+  return "semantic-auto";
+}
+
+function normalizeTruncationMode(value: string | undefined): RealtimeTruncationMode {
+  if (value === "auto" || value === "cost" || value === "short" || value === "disabled") {
+    return value;
+  }
+
+  return "auto";
+}
+
 export function normalizeRealtimeVoice(value: string | undefined): RealtimeVoice | undefined {
   if (
     value === "alloy" ||
@@ -104,6 +151,70 @@ function getVoiceSpeedInstruction(speed: VoiceSpeed): string {
   return "Voice speed: fast. Speak faster than normal while staying understandable.";
 }
 
+function getVoicePlaybackSpeed(speed: VoiceSpeed): number {
+  if (speed === "slow") {
+    return 0.9;
+  }
+
+  if (speed === "normal") {
+    return 1;
+  }
+
+  if (speed === "fast") {
+    return 1.15;
+  }
+
+  return 1.25;
+}
+
+function getTurnDetection(mode: TurnDetectionMode): Record<string, unknown> {
+  if (mode === "server-balanced" || mode === "server-fast") {
+    return {
+      type: "server_vad",
+      threshold: 0.5,
+      prefix_padding_ms: 300,
+      silence_duration_ms: mode === "server-fast" ? 300 : 500,
+      create_response: true,
+      interrupt_response: true
+    };
+  }
+
+  return {
+    type: "semantic_vad",
+    eagerness: mode === "semantic-low" ? "low" : mode === "semantic-high" ? "high" : "auto",
+    create_response: true,
+    interrupt_response: true
+  };
+}
+
+function getTruncation(mode: RealtimeTruncationMode): string | Record<string, unknown> {
+  if (mode === "disabled") {
+    return "disabled";
+  }
+
+  if (mode === "cost") {
+    return {
+      type: "retention_ratio",
+      retention_ratio: 0.8,
+      token_limits: {
+        post_instructions: 8000
+      }
+    };
+  }
+
+  if (mode === "short") {
+    return {
+      type: "retention_ratio",
+      retention_ratio: 0.7,
+      token_limits: {
+        post_instructions: 4000
+      }
+    };
+  }
+
+  return "auto";
+}
+
 function readRealtimeSessionInput(req: Request): RealtimeSessionInput {
   const body = req.body as unknown;
   const sdp = typeof body === "string" ? body : readBodyString(body, "sdp") ?? "";
@@ -112,8 +223,19 @@ function readRealtimeSessionInput(req: Request): RealtimeSessionInput {
     readBodyString(body, "conversationId") ?? readHeader(req.headers["x-conversation-id"]) ?? "";
   const reasoningEffort =
     readBodyString(body, "reasoningEffort") ?? readHeader(req.headers["x-codex-reasoning"]) ?? "low";
+  const realtimeReasoningEffort = normalizeRealtimeReasoningEffort(
+    readBodyString(body, "realtimeReasoningEffort") ??
+      readHeader(req.headers["x-realtime-reasoning"]) ??
+      process.env.REALTIME_REASONING_EFFORT
+  );
   const voiceSpeed = normalizeVoiceSpeed(
     readBodyString(body, "voiceSpeed") ?? readHeader(req.headers["x-voice-speed"])
+  );
+  const turnDetectionMode = normalizeTurnDetectionMode(
+    readBodyString(body, "turnDetectionMode") ?? readHeader(req.headers["x-turn-detection-mode"])
+  );
+  const truncationMode = normalizeTruncationMode(
+    readBodyString(body, "truncationMode") ?? readHeader(req.headers["x-truncation-mode"])
   );
   const voice = getRealtimeVoice(readBodyString(body, "voice") ?? readHeader(req.headers["x-realtime-voice"]));
   const voiceSystemPrompt =
@@ -124,8 +246,11 @@ function readRealtimeSessionInput(req: Request): RealtimeSessionInput {
     targetPath,
     conversationId,
     reasoningEffort,
+    realtimeReasoningEffort,
     voice,
     voiceSpeed,
+    turnDetectionMode,
+    truncationMode,
     voiceSystemPrompt
   };
 }
@@ -173,12 +298,20 @@ export function buildRealtimeSessionConfig(input: {
   targetPath: string;
   conversationId: string;
   reasoningEffort: string;
+  realtimeReasoningEffort?: string;
   voice?: string;
   voiceSpeed?: string;
+  turnDetectionMode?: string;
+  truncationMode?: string;
   voiceSystemPrompt?: string;
 }): Record<string, unknown> {
   const voice = getRealtimeVoice(input.voice);
   const voiceSpeed = normalizeVoiceSpeed(input.voiceSpeed);
+  const realtimeReasoningEffort = normalizeRealtimeReasoningEffort(
+    input.realtimeReasoningEffort ?? process.env.REALTIME_REASONING_EFFORT
+  );
+  const turnDetectionMode = normalizeTurnDetectionMode(input.turnDetectionMode);
+  const truncationMode = normalizeTruncationMode(input.truncationMode);
   const customPrompt = input.voiceSystemPrompt?.trim();
   const instructions = [
     "You are a live voice codebase Q&A assistant.",
@@ -186,7 +319,8 @@ export function buildRealtimeSessionConfig(input: {
     "This is a fast interactive conversation, not a complete code review by default.",
     "Use simple English. Be concise and direct.",
     'Keep spoken filler short. Example: say "Let me check that", not "Let me check that quickly so I can give you the exact folder name."',
-    "For normal codebase questions, call get_codebase_overview, search_codebase, or read_codebase_file and answer directly from those tool results.",
+    "For normal codebase questions, use the fast codebase tools and answer directly from those tool results.",
+    "Use find_codebase_files for path/name discovery, list_codebase_directory to inspect nearby files, search_codebase for exact text search, run_ripgrep for regex search, and read_codebase_file for bounded file excerpts.",
     "Do not call ask_codex for normal orientation, navigation, or small exact-behavior questions.",
     "Only call ask_codex when the user explicitly asks for a deep pass, a bug hunt, a security review, or says to go deeper.",
     "After calling any tool, wait for the tool output. Do not give extra still-running status messages.",
@@ -203,6 +337,7 @@ export function buildRealtimeSessionConfig(input: {
     "If the user asks where the evidence is, say that the exact references are in the transcript.",
     `Current target path: ${input.targetPath || "not selected"}`,
     `Current conversation id: ${input.conversationId || "not created yet"}`,
+    `Realtime reasoning amount selected by the user: ${realtimeReasoningEffort}`,
     `Codex reasoning amount selected by the user: ${input.reasoningEffort}`
   ];
 
@@ -215,11 +350,16 @@ export function buildRealtimeSessionConfig(input: {
     model: getRealtimeModel(),
     instructions: instructions.join("\n"),
     reasoning: {
-      effort: process.env.REALTIME_REASONING_EFFORT || "low"
+      effort: realtimeReasoningEffort
     },
+    truncation: getTruncation(truncationMode),
     audio: {
+      input: {
+        turn_detection: getTurnDetection(turnDetectionMode)
+      },
       output: {
-        voice
+        voice,
+        speed: getVoicePlaybackSpeed(voiceSpeed)
       }
     },
     tools: [
@@ -232,6 +372,52 @@ export function buildRealtimeSessionConfig(input: {
           type: "object",
           additionalProperties: false,
           properties: {},
+          required: []
+        }
+      },
+      {
+        type: "function",
+        name: "find_codebase_files",
+        description:
+          "Find files by path or filename substring inside the selected codebase. Use this before reading when a likely directory, feature, or filename is known.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            query: {
+              type: "string",
+              description: "Case-insensitive substring to match against relative file paths."
+            },
+            max_results: {
+              type: "number",
+              description: "Maximum file paths to return. Defaults to 40."
+            }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        type: "function",
+        name: "list_codebase_directory",
+        description:
+          "List files and subdirectories under a relative directory in the selected codebase, with bounded depth.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            directory_path: {
+              type: "string",
+              description: "Relative directory path inside the selected codebase. Defaults to the repo root."
+            },
+            depth: {
+              type: "number",
+              description: "Directory depth to list. Defaults to 1, maximum 3."
+            },
+            max_results: {
+              type: "number",
+              description: "Maximum entries to return. Defaults to 120."
+            }
+          },
           required: []
         }
       },
@@ -254,6 +440,39 @@ export function buildRealtimeSessionConfig(input: {
             }
           },
           required: ["query"]
+        }
+      },
+      {
+        type: "function",
+        name: "run_ripgrep",
+        description:
+          "Run a bounded ripgrep search inside the selected codebase. Use for regex search or when exact text search is too weak. This does not execute arbitrary shell commands.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            pattern: {
+              type: "string",
+              description: "Ripgrep search pattern. Treated as a regex unless fixed_strings is true."
+            },
+            search_path: {
+              type: "string",
+              description: "Relative file or directory path to search. Defaults to the repo root."
+            },
+            max_results: {
+              type: "number",
+              description: "Maximum matches to return. Defaults to 40."
+            },
+            fixed_strings: {
+              type: "boolean",
+              description: "Use ripgrep fixed-string mode instead of regex mode."
+            },
+            case_sensitive: {
+              type: "boolean",
+              description: "Use case-sensitive matching. Defaults to false."
+            }
+          },
+          required: ["pattern"]
         }
       },
       {

@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Square,
   Sun,
+  Trash2,
   X
 } from "lucide-react";
 import hljs from "highlight.js";
@@ -55,6 +56,14 @@ type RealtimeVoice =
   | "marin"
   | "cedar";
 type VoiceSpeed = "slow" | "normal" | "fast" | "very-fast";
+type RealtimeReasoningEffort = CodexReasoningEffort;
+type TurnDetectionMode =
+  | "semantic-auto"
+  | "semantic-low"
+  | "semantic-high"
+  | "server-balanced"
+  | "server-fast";
+type RealtimeTruncationMode = "auto" | "cost" | "short" | "disabled";
 
 const voiceOptions: Array<{ value: RealtimeVoice; label: string }> = [
   { value: "marin", label: "Marin" },
@@ -74,6 +83,21 @@ const voiceSpeedOptions: Array<{ value: VoiceSpeed; label: string }> = [
   { value: "normal", label: "Normal" },
   { value: "fast", label: "Fast" },
   { value: "very-fast", label: "Very Fast" }
+];
+
+const turnDetectionOptions: Array<{ value: TurnDetectionMode; label: string }> = [
+  { value: "semantic-auto", label: "Semantic" },
+  { value: "semantic-low", label: "Patient" },
+  { value: "semantic-high", label: "Eager" },
+  { value: "server-balanced", label: "Server" },
+  { value: "server-fast", label: "Server fast" }
+];
+
+const truncationOptions: Array<{ value: RealtimeTruncationMode; label: string }> = [
+  { value: "auto", label: "Auto" },
+  { value: "cost", label: "Cost cap" },
+  { value: "short", label: "Tight cap" },
+  { value: "disabled", label: "Disabled" }
 ];
 
 const defaultCodeViewerWidth = 720;
@@ -161,8 +185,11 @@ export function App() {
   const [validatedPathInput, setValidatedPathInput] = useState("");
   const [activeTab, setActiveTab] = useState<ActiveTab>("review");
   const [reasoningEffort, setReasoningEffort] = useState<CodexReasoningEffort>("low");
+  const [realtimeReasoningEffort, setRealtimeReasoningEffort] = useState<RealtimeReasoningEffort>("low");
   const [voice, setVoice] = useState<RealtimeVoice>("marin");
   const [voiceSpeed, setVoiceSpeed] = useState<VoiceSpeed>("very-fast");
+  const [turnDetectionMode, setTurnDetectionMode] = useState<TurnDetectionMode>("semantic-auto");
+  const [truncationMode, setTruncationMode] = useState<RealtimeTruncationMode>("auto");
   const [voiceSystemPrompt, setVoiceSystemPrompt] = useState(defaultVoiceSystemPrompt);
   const [conversation, setConversation] = useState<ConversationRecord | null>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
@@ -192,6 +219,10 @@ export function App() {
   const previewUrlRef = useRef<string | null>(null);
   const microphoneTracksRef = useRef<MediaStreamTrack[]>([]);
   const microphoneEnableTimerRef = useRef<number | undefined>(undefined);
+  const microphoneMeterRef = useRef<HTMLDivElement | null>(null);
+  const microphoneAudioContextRef = useRef<AudioContext | null>(null);
+  const microphoneAudioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const microphoneMeterFrameRef = useRef<number | undefined>(undefined);
   const quizQuestionsRef = useRef<QuizQuestion[]>([]);
   const activeQuizQuestionIdRef = useRef<string | null>(null);
   const handledToolCallIdsRef = useRef<Set<string>>(new Set());
@@ -326,6 +357,92 @@ export function App() {
       return items.slice(0, -1);
     });
   }, []);
+
+  const clearTranscript = useCallback(() => {
+    assistantDeltaSourceRef.current = null;
+    setTranscript([]);
+  }, []);
+
+  const setMicrophoneMeterLevels = useCallback((levels: number[]) => {
+    const bars = microphoneMeterRef.current?.querySelectorAll<HTMLSpanElement>("span");
+
+    if (!bars) {
+      return;
+    }
+
+    bars.forEach((bar, index) => {
+      const level = levels[index] ?? 0;
+      bar.style.height = `${4 + level * 26}px`;
+    });
+  }, []);
+
+  const stopMicrophoneMeter = useCallback(() => {
+    if (microphoneMeterFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(microphoneMeterFrameRef.current);
+      microphoneMeterFrameRef.current = undefined;
+    }
+
+    microphoneAudioSourceRef.current?.disconnect();
+    microphoneAudioSourceRef.current = null;
+
+    const audioContext = microphoneAudioContextRef.current;
+    microphoneAudioContextRef.current = null;
+
+    if (audioContext && audioContext.state !== "closed") {
+      void audioContext.close();
+    }
+
+    setMicrophoneMeterLevels([0, 0, 0, 0, 0]);
+  }, [setMicrophoneMeterLevels]);
+
+  const startMicrophoneMeter = useCallback(
+    (stream: MediaStream) => {
+      stopMicrophoneMeter();
+
+      const audioContext = new AudioContext();
+      const analyser = audioContext.createAnalyser();
+      const source = audioContext.createMediaStreamSource(stream);
+
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.7;
+      source.connect(analyser);
+      microphoneAudioContextRef.current = audioContext;
+      microphoneAudioSourceRef.current = source;
+      void audioContext.resume().catch(() => undefined);
+
+      const frequencyData = new Uint8Array(analyser.frequencyBinCount);
+      const barRanges: Array<[number, number]> = [
+        [1, 3],
+        [4, 7],
+        [8, 12],
+        [13, 20],
+        [21, 34]
+      ];
+
+      const updateMeter = () => {
+        analyser.getByteFrequencyData(frequencyData);
+
+        const levels = barRanges.map(([start, end]) => {
+          let total = 0;
+          let count = 0;
+
+          for (let index = start; index <= end && index < frequencyData.length; index += 1) {
+            total += frequencyData[index];
+            count += 1;
+          }
+
+          const average = count === 0 ? 0 : total / count / 255;
+          return Math.min(1, Math.sqrt(average) * 1.35);
+        });
+
+        setMicrophoneMeterLevels(levels);
+        microphoneMeterFrameRef.current = window.requestAnimationFrame(updateMeter);
+      };
+
+      microphoneMeterFrameRef.current = window.requestAnimationFrame(updateMeter);
+    },
+    [setMicrophoneMeterLevels, stopMicrophoneMeter]
+  );
 
   const setMicrophoneEnabled = useCallback((enabled: boolean) => {
     if (microphoneEnableTimerRef.current !== undefined) {
@@ -799,6 +916,7 @@ export function App() {
         }
       });
       microphoneTracksRef.current = stream.getAudioTracks();
+      startMicrophoneMeter(stream);
       const peer = new RTCPeerConnection();
       peerRef.current = peer;
 
@@ -841,8 +959,11 @@ export function App() {
           targetPath: activeTargetPath,
           conversationId: activeConversation.id,
           reasoningEffort,
+          realtimeReasoningEffort,
           voice,
           voiceSpeed,
+          turnDetectionMode,
+          truncationMode,
           voiceSystemPrompt
         })
       });
@@ -869,6 +990,7 @@ export function App() {
 
   function disconnectVoice() {
     stopVoicePreview();
+    stopMicrophoneMeter();
     if (microphoneEnableTimerRef.current !== undefined) {
       window.clearTimeout(microphoneEnableTimerRef.current);
       microphoneEnableTimerRef.current = undefined;
@@ -1034,7 +1156,10 @@ export function App() {
 
     if (
       toolCall.name === "get_codebase_overview" ||
+      toolCall.name === "find_codebase_files" ||
+      toolCall.name === "list_codebase_directory" ||
       toolCall.name === "search_codebase" ||
+      toolCall.name === "run_ripgrep" ||
       toolCall.name === "read_codebase_file"
     ) {
       await answerFastCodebaseToolCall(toolCall, activeConversation);
@@ -1125,6 +1250,12 @@ export function App() {
       query?: string;
       max_results?: number;
       file_path?: string;
+      directory_path?: string;
+      depth?: number;
+      pattern?: string;
+      search_path?: string;
+      fixed_strings?: boolean;
+      case_sensitive?: boolean;
       start_line?: number;
       line_count?: number;
     };
@@ -1136,11 +1267,39 @@ export function App() {
       });
     }
 
+    if (toolCall.name === "find_codebase_files") {
+      return postJson("/api/codebase/files", {
+        targetPath: activeTargetPath,
+        query: args.query ?? "",
+        maxResults: args.max_results
+      });
+    }
+
+    if (toolCall.name === "list_codebase_directory") {
+      return postJson("/api/codebase/directory", {
+        targetPath: activeTargetPath,
+        directoryPath: args.directory_path,
+        depth: args.depth,
+        maxResults: args.max_results
+      });
+    }
+
     if (toolCall.name === "search_codebase") {
       return postJson("/api/codebase/search", {
         targetPath: activeTargetPath,
         query: args.query ?? "",
         maxResults: args.max_results
+      });
+    }
+
+    if (toolCall.name === "run_ripgrep") {
+      return postJson("/api/codebase/rg", {
+        targetPath: activeTargetPath,
+        pattern: args.pattern ?? "",
+        searchPath: args.search_path,
+        maxResults: args.max_results,
+        fixedStrings: args.fixed_strings,
+        caseSensitive: args.case_sensitive
       });
     }
 
@@ -1262,6 +1421,7 @@ export function App() {
             <span>Codebase path</span>
             <div className="path-row">
               <input
+                name="targetPath"
                 value={targetPath}
                 onChange={(event) => {
                   setTargetPath(event.target.value);
@@ -1283,10 +1443,26 @@ export function App() {
             </div>
           </label>
 
-          <div className="field-row">
+          <div className="settings-grid">
             <label className="field">
-              <span>Codex reasoning</span>
+              <span>RT reason</span>
               <select
+                name="realtimeReasoningEffort"
+                value={realtimeReasoningEffort}
+                onChange={(event) => setRealtimeReasoningEffort(event.target.value as RealtimeReasoningEffort)}
+              >
+                {reasoningOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Codex reason</span>
+              <select
+                name="reasoningEffort"
                 value={reasoningEffort}
                 onChange={(event) => setReasoningEffort(event.target.value as CodexReasoningEffort)}
               >
@@ -1299,8 +1475,9 @@ export function App() {
             </label>
 
             <label className="field">
-              <span>Voice speed</span>
+              <span>Speed</span>
               <select
+                name="voiceSpeed"
                 value={voiceSpeed}
                 onChange={(event) => setVoiceSpeed(event.target.value as VoiceSpeed)}
               >
@@ -1311,40 +1488,82 @@ export function App() {
                 ))}
               </select>
             </label>
-          </div>
 
-          <label className="field">
-            <span>Voice</span>
-            <div className="voice-select-row">
+            <label className="field">
+              <span className="label-with-help">
+                Turn
+                <span className="help-mark" title="Controls when the assistant decides you finished speaking.">
+                  ?
+                </span>
+              </span>
               <select
-                value={voice}
-                onChange={(event) => {
-                  stopVoicePreview();
-                  setVoice(event.target.value as RealtimeVoice);
-                }}
+                name="turnDetectionMode"
+                value={turnDetectionMode}
+                onChange={(event) => setTurnDetectionMode(event.target.value as TurnDetectionMode)}
               >
-                {voiceOptions.map((option) => (
+                {turnDetectionOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
                 ))}
               </select>
-              <button
-                className="icon-button"
-                type="button"
-                onClick={previewVoice}
-                disabled={isPreviewingVoice}
-                title="Preview voice"
-                aria-label="Preview voice"
+            </label>
+
+            <label className="field">
+              <span className="label-with-help">
+                Truncation
+                <span className="help-mark" title="Controls how much old chat is kept when the session gets long.">
+                  ?
+                </span>
+              </span>
+              <select
+                name="truncationMode"
+                value={truncationMode}
+                onChange={(event) => setTruncationMode(event.target.value as RealtimeTruncationMode)}
               >
-                <Play size={18} />
-              </button>
-            </div>
-          </label>
+                {truncationOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Voice</span>
+              <div className="voice-select-row">
+                <select
+                  name="voice"
+                  value={voice}
+                  onChange={(event) => {
+                    stopVoicePreview();
+                    setVoice(event.target.value as RealtimeVoice);
+                  }}
+                >
+                  {voiceOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="icon-button"
+                  type="button"
+                  onClick={previewVoice}
+                  disabled={isPreviewingVoice}
+                  title="Preview voice"
+                  aria-label="Preview voice"
+                >
+                  <Play size={18} />
+                </button>
+              </div>
+            </label>
+          </div>
 
           <label className="field">
             <span>System prompt</span>
             <textarea
+              name="voiceSystemPrompt"
               value={voiceSystemPrompt}
               onChange={(event) => setVoiceSystemPrompt(event.target.value)}
               placeholder="Extra voice instructions. Example: answer in very short bullets."
@@ -1371,7 +1590,7 @@ export function App() {
           </div>
 
           <div className={`activity-card ${activity}`} aria-live="polite">
-            <div className="activity-visual" aria-hidden="true">
+            <div className="activity-visual" aria-hidden="true" ref={microphoneMeterRef}>
               <span />
               <span />
               <span />
@@ -1439,6 +1658,17 @@ export function App() {
             </div>
             <div className="panel-header-actions">
               {isAskingCodex ? <span className="busy-dot">Codex running</span> : null}
+              {activeTab === "review" ? (
+                <button
+                  className="secondary-action transcript-clear-button"
+                  type="button"
+                  onClick={clearTranscript}
+                  disabled={transcript.length === 0}
+                >
+                  <Trash2 size={16} />
+                  Clear
+                </button>
+              ) : null}
               <div className="view-tabs" role="tablist" aria-label="Main view">
                 <button
                   type="button"
