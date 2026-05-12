@@ -20,36 +20,25 @@ const auditPresets: Record<AuditPresetId, AuditPreset> = {
       "",
       "Output Markdown with these sections or questions:",
       "Short answer",
-      "System overview",
-      "Trust boundaries",
-      "Assets",
-      "Entry points",
-      "Main attacker-controlled flows",
-      "Security assumptions to verify",
-      "Most useful next checks",
+      "**What could be the worse scenario for this codebase?** (here you can mention data breaches, DoS, account takeovers, remote code execution, etc. The most important is to be specific to the codebase and its functionality)",
+      "**What are the entrypoints for an attacker to break everything?** (be specific to the codebase as usual but for example it can be a specific API route, a file upload feature, via a transaction call, a malicious EVM bytecode, a malicious peer)",
+      "**Who are the actors we trust** (here you say for example admin, deployer, multisig, treausry etc, be specific to the codebase)",
+      "**Who are the actors we do not trust** (here you say for arbitrageurs etc, again typical to the codebase)",
       "",
-      "Every concrete claim must include file and line references when possible. If evidence is missing, say that clearly."
     ].join("\n")
   },
   "user-input": {
     id: "user-input",
-    title: "User input",
+    title: "MISC",
     question: [
-      "Identify what is triggerable by a user or any untrusted actor in this codebase.",
+      "Investigate these questions. Reply in a simple English and wording.",
       "",
-      "Include direct user actions, network/API inputs, CLI inputs, file uploads, webhooks, scheduled jobs fed by external data, config/env inputs, and other untrusted boundaries if present.",
+      "Do not trust README assertions unless the code supports them.",
       "",
-      "Inspect the relevant files before making claims. Do not infer triggerability from names only.",
+      "**What are the explicit security invariants that should always hold?**",
       "",
-      "Output Markdown with these sections:",
-      "Short answer",
-      "Triggerable surfaces",
-      "Untrusted data paths",
-      "Parsing and validation points",
-      "Sensitive sinks reachable from untrusted input",
-      "Unknowns / needs more checking",
-      "",
-      "Every concrete claim must include file and line references when possible. If evidence is missing, say that clearly."
+      "**What is the most smart to fuzz if fuzzable ?**",
+      ""
     ].join("\n")
   },
   "useful-skills": {
@@ -65,15 +54,11 @@ const auditPresets: Record<AuditPresetId, AuditPreset> = {
       "2. Which of those skills apply best to this specific codebase after inspecting its language, framework, architecture, and attacker-controlled surfaces?",
       "",
       "Output Markdown with these sections:",
-      "Ranked useful skills",
-      "Best security-bug skills",
-      "Best fit for this codebase",
-      "How to use them here",
-      "Unknowns / needs more checking",
+      "** Top ranked and best fit and useful skills**",
+      "** Top best and accurate security-bug skills**",
       "",
       "Sort the ranking with the best choice first. For each ranked skill, include the skill name, what it is good for, why it fits or does not fit this codebase, and a concrete example prompt the user could run next.",
       "",
-      "Every concrete codebase-fit claim must include file and line references when possible. Every skill claim should cite the skill source when readable. If no skill inventory is visible, say that clearly and list only skill categories, not fake skill names."
     ].join("\n")
   }
 };

@@ -135,12 +135,13 @@ const auditPresetOptions: Array<{ id: AuditPresetId; label: string }> = [
 
 const defaultVoiceSystemPrompt = [
   "- When speaking, do not mention file names or line numbers.",
-  "- Keep exact references in visible text only.",
   "- Use simple English, go straight to the point. Don't be fluffy.",
+  "- Be friendly, act if you were a colleague assistant the person doing the code-review (the user).",
   "- Assume the user is new to this codebase and does not understand much yet.",
   '- Do not end with generic follow-up offers like "If you want, I can look ...".',
   "- Keep answers short and interactive. For broad questions, give a quick orientation and stop after the useful answer.",
-  '- Keep spoken filler short. Example: say "Let me check that", not "Let me check that quickly so I can give you the exact folder name."'
+  '- Keep spoken filler short. Example: say "Let me check", not "Let me check that quickly so I can give you the exact folder name."',
+  '- You might receive code-related vocabulary in your prompt, be aware of that. So user might give some weird vocabulary like a word that refers to a function name or variable',
 ].join("\n");
 
 interface PendingToolCall {
@@ -1930,11 +1931,10 @@ export function App() {
 
           <div className="cost-card" aria-live="polite">
             <div className="cost-card-header">
-              <div>
-                <span className="cost-grid">API cost</span>
-				  {formatUsd(costSummary.totalUsd)}
+              <div className="cost-grid">
+                <span>API cost</span>
+                <strong>{formatUsd(costSummary.totalUsd)}</strong>
               </div>
-              <span>Checked {pricingMetadata.checkedAt}</span>
             </div>
 
             <div className="cost-grid">
@@ -1969,11 +1969,7 @@ export function App() {
               )}
             </div>
           </div>
-
-          <div className="session-meta">
-            <span>Codex session</span>
-            <strong>{conversation?.codexSessionId || "Created after deep Codex check"}</strong>
-          </div>
+ 
         </aside>
 
         <section className="review-panel" aria-label={activeTab === "review" ? "Question transcript" : "Codebase quiz"}>

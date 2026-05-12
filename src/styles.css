@@ -509,7 +509,7 @@ textarea:focus {
 
 .cost-card-header strong {
   display: block;
-  font-size: 16px;
+  font-size: inherit;
   font-weight: 700;
   line-height: 1.1;
 }
