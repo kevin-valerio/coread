@@ -223,6 +223,7 @@ export function App() {
   const [turnDetectionMode, setTurnDetectionMode] = useState<TurnDetectionMode>("semantic-auto");
   const [truncationMode, setTruncationMode] = useState<RealtimeTruncationMode>("auto");
   const [voiceSystemPrompt, setVoiceSystemPrompt] = useState(defaultVoiceSystemPrompt);
+  const [voiceSystemPromptLoaded, setVoiceSystemPromptLoaded] = useState(false);
   const [conversation, setConversation] = useState<ConversationRecord | null>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceActivity, setVoiceActivity] = useState<VoiceActivity>("idle");
@@ -253,6 +254,11 @@ export function App() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const previewUrlRef = useRef<string | null>(null);
+  const voiceSystemPromptSaveTimerRef = useRef<number | undefined>(undefined);
+  const lastSavedVoiceSystemPromptRef = useRef(defaultVoiceSystemPrompt);
+  const pendingVoiceSystemPromptRef = useRef(defaultVoiceSystemPrompt);
+  const pendingVoiceSystemPromptUpdatedAtRef = useRef(new Date(0).toISOString());
+  const voiceSystemPromptSaveErrorRef = useRef("");
   const microphoneTracksRef = useRef<MediaStreamTrack[]>([]);
   const microphoneEnableTimerRef = useRef<number | undefined>(undefined);
   const microphoneMeterRef = useRef<HTMLDivElement | null>(null);
@@ -344,6 +350,129 @@ export function App() {
       }
     ]);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadVoiceSystemPrompt() {
+      try {
+        const response = await fetch("/api/system-prompts/voice");
+
+        if (!response.ok) {
+          throw new Error(await readResponseError(response));
+        }
+
+        const payload = await readJsonResponse<{
+          ok: boolean;
+          voiceSystemPrompt?: string;
+          updatedAt?: string;
+        }>(response, "System prompt could not be loaded.");
+        const storedPrompt =
+          typeof payload.voiceSystemPrompt === "string"
+            ? payload.voiceSystemPrompt
+            : defaultVoiceSystemPrompt;
+
+        if (cancelled) {
+          return;
+        }
+
+        pendingVoiceSystemPromptRef.current = storedPrompt;
+        pendingVoiceSystemPromptUpdatedAtRef.current = payload.updatedAt ?? new Date(0).toISOString();
+        lastSavedVoiceSystemPromptRef.current = storedPrompt;
+        setVoiceSystemPrompt(storedPrompt);
+      } catch (error) {
+        if (!cancelled) {
+          const message =
+            error instanceof Error ? error.message : "System prompt could not be loaded.";
+          addTranscript("error", message);
+        }
+      } finally {
+        if (!cancelled) {
+          setVoiceSystemPromptLoaded(true);
+        }
+      }
+    }
+
+    void loadVoiceSystemPrompt();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [addTranscript]);
+
+  useEffect(() => {
+    if (!voiceSystemPromptLoaded) {
+      return;
+    }
+
+    pendingVoiceSystemPromptRef.current = voiceSystemPrompt;
+
+    if (voiceSystemPrompt === lastSavedVoiceSystemPromptRef.current) {
+      return;
+    }
+
+    if (voiceSystemPromptSaveTimerRef.current !== undefined) {
+      window.clearTimeout(voiceSystemPromptSaveTimerRef.current);
+    }
+
+    const prompt = voiceSystemPrompt;
+    const updatedAt = pendingVoiceSystemPromptUpdatedAtRef.current;
+
+    voiceSystemPromptSaveTimerRef.current = window.setTimeout(() => {
+      voiceSystemPromptSaveTimerRef.current = undefined;
+      saveVoiceSystemPrompt(prompt, updatedAt)
+        .then(() => {
+          if (pendingVoiceSystemPromptUpdatedAtRef.current === updatedAt) {
+            lastSavedVoiceSystemPromptRef.current = prompt;
+          }
+
+          voiceSystemPromptSaveErrorRef.current = "";
+        })
+        .catch((error) => {
+          const message =
+            error instanceof Error ? error.message : "System prompt could not be saved.";
+
+          if (voiceSystemPromptSaveErrorRef.current !== message) {
+            voiceSystemPromptSaveErrorRef.current = message;
+            addTranscript("error", message);
+          }
+        });
+    }, 250);
+
+    return () => {
+      if (voiceSystemPromptSaveTimerRef.current !== undefined) {
+        window.clearTimeout(voiceSystemPromptSaveTimerRef.current);
+        voiceSystemPromptSaveTimerRef.current = undefined;
+      }
+    };
+  }, [addTranscript, voiceSystemPrompt, voiceSystemPromptLoaded]);
+
+  useEffect(() => {
+    if (!voiceSystemPromptLoaded) {
+      return;
+    }
+
+    const saveBeforeUnload = () => {
+      if (voiceSystemPromptSaveTimerRef.current !== undefined) {
+        window.clearTimeout(voiceSystemPromptSaveTimerRef.current);
+        voiceSystemPromptSaveTimerRef.current = undefined;
+      }
+
+      const prompt = pendingVoiceSystemPromptRef.current;
+
+      if (prompt === lastSavedVoiceSystemPromptRef.current) {
+        return;
+      }
+
+      if (sendVoiceSystemPromptBeacon(prompt, pendingVoiceSystemPromptUpdatedAtRef.current)) {
+        lastSavedVoiceSystemPromptRef.current = prompt;
+      }
+    };
+
+    window.addEventListener("pagehide", saveBeforeUnload);
+
+    return () => window.removeEventListener("pagehide", saveBeforeUnload);
+  }, [voiceSystemPromptLoaded]);
 
   const beginUserTranscript = useCallback(() => {
     if (pendingUserTranscriptIdRef.current) {
@@ -1881,7 +2010,11 @@ export function App() {
             <textarea
               name="voiceSystemPrompt"
               value={voiceSystemPrompt}
-              onChange={(event) => setVoiceSystemPrompt(event.target.value)}
+              onChange={(event) => {
+                pendingVoiceSystemPromptRef.current = event.target.value;
+                pendingVoiceSystemPromptUpdatedAtRef.current = new Date().toISOString();
+                setVoiceSystemPrompt(event.target.value);
+              }}
               placeholder="Extra voice instructions. Example: answer in very short bullets."
             />
           </label>
@@ -2692,6 +2825,46 @@ async function postJson(url: string, body: unknown): Promise<unknown> {
   }
 
   return readJsonResponse(response, "Request failed.");
+}
+
+async function saveVoiceSystemPrompt(voiceSystemPrompt: string, updatedAt: string): Promise<void> {
+  const response = await fetch("/api/system-prompts/voice", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ voiceSystemPrompt, updatedAt })
+  });
+
+  if (!response.ok) {
+    throw new Error(await readResponseError(response));
+  }
+
+  const payload = await readJsonResponse<{ ok: boolean; error?: string }>(
+    response,
+    "System prompt could not be saved."
+  );
+
+  if (!payload.ok) {
+    throw new Error(payload.error || "System prompt could not be saved.");
+  }
+}
+
+function sendVoiceSystemPromptBeacon(voiceSystemPrompt: string, updatedAt: string): boolean {
+  const body = JSON.stringify({ voiceSystemPrompt, updatedAt });
+
+  if (navigator.sendBeacon) {
+    return navigator.sendBeacon(
+      "/api/system-prompts/voice",
+      new Blob([body], { type: "application/json" })
+    );
+  }
+
+  void fetch("/api/system-prompts/voice", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    keepalive: true
+  });
+  return true;
 }
 
 function readRealtimeErrorMessage(event: Record<string, unknown>): string {

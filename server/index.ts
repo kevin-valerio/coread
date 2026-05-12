@@ -7,6 +7,7 @@ import { isAuditPresetId, runAuditPreset } from "./auditPresets";
 import { createRealtimeSession } from "./realtime";
 import { createVoicePreview } from "./voicePreview";
 import { createConversation, listConversations } from "./store";
+import { readVoiceSystemPromptRecord, writeVoiceSystemPrompt } from "./systemPrompts";
 import { resolveDirectory, resolveFileInsideDirectory } from "./pathUtils";
 import {
   findCodebaseFiles,
@@ -58,6 +59,37 @@ app.get("/api/health", (_req, res) => {
     realtimeModel: process.env.REALTIME_MODEL || "gpt-realtime-2",
     hasOpenAIKey: Boolean(process.env.OPENAI_API_KEY)
   });
+});
+
+app.get("/api/system-prompts/voice", async (_req, res, next) => {
+  try {
+    res.json({ ok: true, ...(await readVoiceSystemPromptRecord()) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/system-prompts/voice", async (req, res, next) => {
+  try {
+    if (
+      !req.body ||
+      typeof req.body !== "object" ||
+      Array.isArray(req.body) ||
+      typeof req.body.voiceSystemPrompt !== "string"
+    ) {
+      res.status(400).json({ ok: false, error: "Missing voice system prompt." });
+      return;
+    }
+
+    const updatedAt =
+      typeof req.body.updatedAt === "string" && req.body.updatedAt.trim()
+        ? req.body.updatedAt
+        : new Date().toISOString();
+    const result = await writeVoiceSystemPrompt(req.body.voiceSystemPrompt, updatedAt);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post("/api/codebase/validate", async (req, res, next) => {

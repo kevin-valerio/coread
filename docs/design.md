@@ -15,7 +15,7 @@ The app must support follow-up questions inside one conversation. A single codeb
 1. The user starts the local web app.
 2. The user enters a local codebase path.
 3. The local server validates that the path exists and is a directory.
-4. The user chooses Codex reasoning amount, previews and selects a Realtime voice, chooses voice speed, and optional voice instructions. Codex reasoning defaults to `low` for deeper investigations.
+4. The user chooses Codex reasoning amount, previews and selects a Realtime voice, chooses voice speed, and optional voice instructions. Codex reasoning defaults to `low` for deeper investigations. Voice instruction edits are saved to `.data/system-prompts.json`; when no saved prompt exists, the UI uses the built-in default.
 5. The user starts voice.
 6. The browser opens a WebRTC session to `gpt-realtime-2` through the local server.
 7. The user asks a question by microphone.
@@ -125,6 +125,8 @@ The local server forwards the SDP to the OpenAI Realtime API with a session conf
 The local server returns the SDP answer to the browser.
 
 Realtime tuning is exposed through compact select controls. The user can choose Realtime reasoning effort, voice speed, turn detection mode, and truncation mode before starting voice. Realtime reasoning defaults to `medium`.
+
+The browser loads the editable voice system prompt from `GET /api/system-prompts/voice` on startup. Edits are auto-saved through `POST /api/system-prompts/voice`, with a page-hide save for refreshes and a client timestamp so older writes do not replace newer prompt text.
 
 Voice speed defaults to Very Fast and uses both Realtime `audio.output.speed` and instruction text. The speed field changes playback rate, while the instruction still guides cadence and brevity.
 
