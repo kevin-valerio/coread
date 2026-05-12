@@ -13,7 +13,7 @@ Local voice app for asking questions about a codebase. It uses OpenAI Realtime f
 OPENAI_API_KEY=key npm run dev
 ```
 
-Transcript entries use the same compact box sizing for user, assistant, status, and error messages.
+Transcript entries use the same compact body typography and box sizing for user, assistant, status, and error messages.
 API failures are shown as explicit transcript errors, including empty or malformed server responses.
 
 ## What's the goal?

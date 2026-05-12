@@ -667,7 +667,9 @@ textarea:focus {
   line-height: 1.35;
 }
 
-.message.status .message-plain {
+.message.status .message-plain,
+.message.user .message-plain,
+.message.error .message-plain {
   font-family: inherit;
 }
 
