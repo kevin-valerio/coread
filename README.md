@@ -1,5 +1,5 @@
 # coread
-
+## What's that ?
 Local voice app for asking questions about a codebase using OpenAI Realtime model. Made for security researchers jumping often from unknown codebase to another one.
 
 | Feature | What it does                                                           |
@@ -8,7 +8,12 @@ Local voice app for asking questions about a codebase using OpenAI Realtime mode
 | Audit presets | Generates a Threat model, User input, and Useful skills audit notes. |
 | Quiz | Generate codebase questions, answer by voice, and get graded feedback. |
 
+## Run
 
 ```bash
 OPENAI_API_KEY=key npm run dev
 ```   
+
+## Demo
+
+Demo video coming soon :)
