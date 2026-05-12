@@ -310,7 +310,7 @@ export function App() {
   const activeQuizQuestionIdRef = useRef<string | null>(null);
   const handledToolCallIdsRef = useRef<Set<string>>(new Set());
   const responseInProgressRef = useRef(false);
-  const pendingAssistantResponseRef = useRef(false);
+  const pendingAssistantResponseChannelRef = useRef<RTCDataChannel | null>(null);
   const assistantDeltaSourceRef = useRef<string | null>(null);
   const pendingUserTranscriptIdRef = useRef<string | null>(null);
   const validatedPathRef = useRef("");
@@ -944,17 +944,18 @@ export function App() {
   }, []);
 
   const flushPendingAssistantResponse = useCallback(() => {
-    if (!pendingAssistantResponseRef.current || responseInProgressRef.current) {
+    const channel = pendingAssistantResponseChannelRef.current;
+
+    if (!channel || responseInProgressRef.current) {
       return false;
     }
 
-    const channel = dataChannelRef.current;
+    pendingAssistantResponseChannelRef.current = null;
 
-    if (!channel || channel.readyState !== "open") {
+    if (channel !== dataChannelRef.current || channel.readyState !== "open") {
       return false;
     }
 
-    pendingAssistantResponseRef.current = false;
     setMicrophoneEnabled(false);
     sendAssistantResponseCreate(channel);
     return true;
@@ -965,11 +966,11 @@ export function App() {
       setMicrophoneEnabled(false);
 
       if (responseInProgressRef.current) {
-        pendingAssistantResponseRef.current = true;
+        pendingAssistantResponseChannelRef.current = channel;
         return;
       }
 
-      pendingAssistantResponseRef.current = false;
+      pendingAssistantResponseChannelRef.current = null;
       sendAssistantResponseCreate(channel);
     },
     [sendAssistantResponseCreate, setMicrophoneEnabled]
@@ -1567,7 +1568,7 @@ export function App() {
         dataChannel.onerror = () => resolve(null);
       });
       dataChannel.onmessage = (event) => {
-        handleRealtimeEvent(event.data, activeConversation).catch((error) => {
+        handleRealtimeEvent(event.data, activeConversation, dataChannel).catch((error) => {
           addTranscript("error", error instanceof Error ? error.message : "Realtime event failed.");
         });
       };
@@ -1627,7 +1628,7 @@ export function App() {
     peerRef.current = null;
     pendingUserTranscriptIdRef.current = null;
     responseInProgressRef.current = false;
-    pendingAssistantResponseRef.current = false;
+    pendingAssistantResponseChannelRef.current = null;
     setVoiceState("idle");
     setVoiceActivity("idle");
   }
@@ -1660,14 +1661,22 @@ export function App() {
     }
   }
 
-  async function handleRealtimeEvent(raw: string, activeConversation: ConversationRecord) {
+  async function handleRealtimeEvent(
+    raw: string,
+    activeConversation: ConversationRecord,
+    eventChannel: RTCDataChannel
+  ) {
+    if (eventChannel !== dataChannelRef.current) {
+      return;
+    }
+
     const event = JSON.parse(raw) as Record<string, unknown>;
     const type = String(event.type ?? "");
 
     if (type === "error" || type.endsWith("_error")) {
       addTranscript("error", readRealtimeErrorMessage(event));
       responseInProgressRef.current = false;
-      pendingAssistantResponseRef.current = false;
+      pendingAssistantResponseChannelRef.current = null;
       assistantDeltaSourceRef.current = null;
       scheduleMicrophoneEnable();
       setVoiceActivity("waiting");
@@ -1768,7 +1777,8 @@ export function App() {
       const toolCall = extractToolCall(event);
 
       if (toolCall) {
-        await answerToolCallOnce(toolCall, activeConversation);
+        setMicrophoneEnabled(false);
+        await answerToolCallOnce(toolCall, activeConversation, eventChannel);
         flushPendingAssistantResponse();
         return;
       }
@@ -1783,18 +1793,26 @@ export function App() {
     }
   }
 
-  async function answerToolCallOnce(toolCall: PendingToolCall, activeConversation: ConversationRecord) {
+  async function answerToolCallOnce(
+    toolCall: PendingToolCall,
+    activeConversation: ConversationRecord,
+    channel: RTCDataChannel
+  ) {
     if (!toolCall.callId || handledToolCallIdsRef.current.has(toolCall.callId)) {
       return;
     }
 
     handledToolCallIdsRef.current.add(toolCall.callId);
-    await answerToolCall(toolCall, activeConversation);
+    await answerToolCall(toolCall, activeConversation, channel);
   }
 
-  async function answerToolCall(toolCall: PendingToolCall, activeConversation: ConversationRecord) {
+  async function answerToolCall(
+    toolCall: PendingToolCall,
+    activeConversation: ConversationRecord,
+    channel: RTCDataChannel
+  ) {
     if (toolCall.name === "grade_quiz_answer") {
-      await answerQuizGradeToolCall(toolCall, activeConversation);
+      await answerQuizGradeToolCall(toolCall, activeConversation, channel);
       return;
     }
 
@@ -1806,7 +1824,7 @@ export function App() {
       toolCall.name === "run_ripgrep" ||
       toolCall.name === "read_codebase_file"
     ) {
-      await answerFastCodebaseToolCall(toolCall, activeConversation);
+      await answerFastCodebaseToolCall(toolCall, activeConversation, channel);
       return;
     }
 
@@ -1834,9 +1852,7 @@ export function App() {
       output = JSON.stringify(buildCodexVoiceToolError(message, toolConversation.id));
     }
 
-    const channel = dataChannelRef.current;
-
-    if (!channel || channel.readyState !== "open") {
+    if (channel !== dataChannelRef.current || channel.readyState !== "open") {
       return;
     }
 
@@ -1855,11 +1871,10 @@ export function App() {
 
   async function answerFastCodebaseToolCall(
     toolCall: PendingToolCall,
-    activeConversation: ConversationRecord
+    activeConversation: ConversationRecord,
+    channel: RTCDataChannel
   ) {
-    const channel = dataChannelRef.current;
-
-    if (!channel || channel.readyState !== "open") {
+    if (channel !== dataChannelRef.current || channel.readyState !== "open") {
       return;
     }
 
@@ -1871,6 +1886,10 @@ export function App() {
       const message = error instanceof Error ? error.message : "Codebase tool failed.";
       addTranscript("error", message);
       output = JSON.stringify({ error: message });
+    }
+
+    if (channel !== dataChannelRef.current || channel.readyState !== "open") {
+      return;
     }
 
     channel.send(
@@ -1957,7 +1976,8 @@ export function App() {
 
   async function answerQuizGradeToolCall(
     toolCall: PendingToolCall,
-    activeConversation: ConversationRecord
+    activeConversation: ConversationRecord,
+    channel: RTCDataChannel
   ) {
     const args = JSON.parse(toolCall.argumentsText || "{}") as {
       question_id?: string;
@@ -1968,14 +1988,17 @@ export function App() {
       ? quizQuestionsRef.current.find((question) => question.id === questionId)?.answer
       : undefined;
     const answer = args.answer?.trim() || storedAnswer || "";
-    const channel = dataChannelRef.current;
 
-    if (!questionId || !channel || channel.readyState !== "open") {
+    if (!questionId || channel !== dataChannelRef.current || channel.readyState !== "open") {
       return;
     }
 
     try {
       const grade = await gradeQuizQuestion(questionId, answer, activeConversation);
+
+      if (channel !== dataChannelRef.current || channel.readyState !== "open") {
+        return;
+      }
 
       channel.send(
         JSON.stringify({
@@ -1995,6 +2018,11 @@ export function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Quiz answer could not be graded.";
       setQuizError(message);
+
+      if (channel !== dataChannelRef.current || channel.readyState !== "open") {
+        return;
+      }
+
       channel.send(
         JSON.stringify({
           type: "conversation.item.create",
