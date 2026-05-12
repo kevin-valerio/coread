@@ -4,7 +4,8 @@ Local voice app for asking questions about a codebase. It uses OpenAI Realtime f
 
 | Feature | What it does                                                           |
 | --- |------------------------------------------------------------------------|
-| Codebase vocal interaction | Ask codebase questions by voice. Normal questions use local overview, file discovery, directory listing, text search, ripgrep, and read-file tools, so Realtime can answer directly without waiting for Codex. Codex is still available for explicit deep passes, bug hunts, and security reviews. The mic is held muted during voice playback to avoid the assistant hearing itself. The transcript can be cleared from the UI. |
+| Codebase vocal interaction | Ask codebase questions by voice. Normal questions use local overview, file discovery, directory listing, text search, ripgrep, and read-file tools, so Realtime can answer directly without waiting for Codex. Codex is still available for explicit deep passes, bug hunts, and security reviews. The mic is held muted during voice playback to avoid the assistant hearing itself. Answers assume the user is new to the codebase and avoid generic follow-up offers. The transcript can be cleared from the UI. |
+| Audit presets | Validate a codebase and coread automatically generates cached Threat model and User input audit notes with Codex `gpt-5.5` high reasoning. |
 | Quiz | Generate codebase questions, answer by voice, and get graded feedback. |
 
 

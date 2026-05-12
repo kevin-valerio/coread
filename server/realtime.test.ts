@@ -32,7 +32,9 @@ describe("buildRealtimeSessionConfig", () => {
     expect(instructions).toContain("When ask_codex returns a spoken_summary field");
     expect(instructions).toContain("If ask_codex returns an error field");
     expect(instructions).toContain("Do not read the full Codex answer aloud.");
-    expect(instructions).toContain("After saying the summary once, ask at most one short follow-up question");
+    expect(instructions).toContain("Assume the user is new to this codebase");
+    expect(instructions).toContain('Do not end with generic follow-up offers like "If you want, I can look ..."');
+    expect(instructions).toContain("After saying the summary once, stop and wait.");
     expect(instructions).toContain("Do not say file names, paths, or line numbers aloud.");
     expect(instructions).toContain("Keep exact file and line references in visible text only.");
     expect(instructions).toContain("Realtime reasoning amount selected by the user: medium");
@@ -81,8 +83,8 @@ describe("buildRealtimeSessionConfig", () => {
     });
 
     expect(String(config.instructions)).toContain("Voice speed: very fast.");
-    expect(String(config.instructions)).toContain("Realtime reasoning amount selected by the user: low");
-    expect(config.reasoning).toEqual({ effort: "low" });
+    expect(String(config.instructions)).toContain("Realtime reasoning amount selected by the user: medium");
+    expect(config.reasoning).toEqual({ effort: "medium" });
     expect(config.truncation).toBe("auto");
     expect(config.audio).toEqual({
       input: {

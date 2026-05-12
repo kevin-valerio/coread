@@ -23,11 +23,14 @@ The app must support follow-up questions inside one conversation. A single codeb
 9. The browser forwards the tool call to the local server.
 10. The local server returns a bounded overview, search results, or a file excerpt.
 11. The browser returns that tool result to the Realtime session.
-12. The Realtime model speaks a concise answer, asks at most one follow-up question, and the UI stores the text transcript.
+12. The Realtime model speaks a concise answer for a user who is new to the codebase, avoids generic follow-up offers, and the UI stores the text transcript.
 13. The UI updates cost totals when Realtime or Codex reports token usage.
 14. If assistant Markdown contains a file link with a line reference, the user can open it in an in-app code side panel.
+15. After a path is validated, the browser starts the Threat model and User input audit presets if that path does not already have cached markdown in localStorage.
 
 For explicit deep work, Realtime can still call `ask_codex`. The browser forwards that call to the local server, and the local server runs `codex exec` against the selected codebase with bounded read-only instructions.
+
+Audit presets use `POST /api/audit/preset`. The server runs Codex read-only with `gpt-5.5` and high reasoning. The browser stores the final markdown per validated codebase path and preset id in localStorage. The right-side preset drawer shows cached markdown, or `Thinking, wait please..` while the preset is still running. Refresh reruns only the selected preset and replaces the cached markdown.
 
 ## Follow-Up Context
 
@@ -45,7 +48,7 @@ For later questions in the same conversation, the server runs:
 codex exec resume <session-id> --json -c sandbox_mode="read-only" -c model_reasoning_effort="<effort>" -o <output-file> -
 ```
 
-Both commands include a `model_reasoning_effort` config override from the UI. New conversations default to `low`; users can choose higher effort when they want a deeper pass.
+Both commands include a `model_reasoning_effort` config override from the UI. New conversations default to `low`; users can choose higher effort when they want a deeper pass. Audit presets also pass a model override, currently `gpt-5.5`.
 
 See `docs/codex-bridge-investigation.md` for the current bridge tradeoff. `codex exec resume` works, but app-server is the better long-term bridge for lower-latency voice sessions.
 
@@ -71,7 +74,7 @@ The local server receives the SDP plus local session settings:
   "targetPath": "/Users/example/project",
   "conversationId": "local-conversation-id",
   "reasoningEffort": "low",
-  "realtimeReasoningEffort": "low",
+  "realtimeReasoningEffort": "medium",
   "voice": "marin",
   "voiceSpeed": "very-fast",
   "turnDetectionMode": "semantic-auto",
@@ -87,7 +90,7 @@ The local server forwards the SDP to the OpenAI Realtime API with a session conf
   "type": "realtime",
   "model": "gpt-realtime-2",
   "reasoning": {
-    "effort": "low"
+    "effort": "medium"
   },
   "truncation": "auto",
   "audio": {
@@ -118,7 +121,7 @@ The local server forwards the SDP to the OpenAI Realtime API with a session conf
 
 The local server returns the SDP answer to the browser.
 
-Realtime tuning is exposed through compact select controls. The user can choose Realtime reasoning effort, voice speed, turn detection mode, and truncation mode before starting voice.
+Realtime tuning is exposed through compact select controls. The user can choose Realtime reasoning effort, voice speed, turn detection mode, and truncation mode before starting voice. Realtime reasoning defaults to `medium`.
 
 Voice speed defaults to Very Fast and uses both Realtime `audio.output.speed` and instruction text. The speed field changes playback rate, while the instruction still guides cadence and brevity.
 
@@ -143,7 +146,7 @@ read_codebase_file
 
 `get_codebase_overview` returns a bounded file tree and key README/package/config snippets. `find_codebase_files` searches relative file paths by substring. `list_codebase_directory` lists a bounded directory tree. `search_codebase` returns exact string matches with file and line numbers. `run_ripgrep` runs a bounded `rg` search inside the selected codebase with controlled options. `read_codebase_file` returns a bounded numbered file excerpt.
 
-After Codex finishes, the browser stores the full Codex answer in the transcript but sends Realtime only a compact `spoken_summary` from the `Short version` or `Short answer` paragraph. The voice says that summary or a close paraphrase, then asks at most one short follow-up question.
+After Codex finishes, the browser stores the full Codex answer in the transcript but sends Realtime only a compact `spoken_summary` from the `Short version` or `Short answer` paragraph. The voice says that summary or a close paraphrase, then stops and waits.
 
 If Codex fails, the browser still returns a `function_call_output` to Realtime. That output includes an `error` field plus a short `spoken_summary`, so the voice can say the check failed instead of acting like the tool is still running.
 

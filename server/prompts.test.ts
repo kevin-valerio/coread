@@ -20,7 +20,8 @@ describe("Codex prompts", () => {
     expect(prompt).toContain("Fast interactive mode");
     expect(prompt).toContain("Stop once you have enough evidence");
     expect(prompt).toContain("at most three detail bullets");
-    expect(prompt).toContain("one short follow-up question");
+    expect(prompt).toContain("Assume the user is new to this codebase");
+    expect(prompt).toContain('Do not end with generic follow-up offers like "If you want, I can look ..."');
     expect(prompt).toContain("Target codebase: /tmp/project");
   });
 

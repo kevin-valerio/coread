@@ -87,7 +87,7 @@ function normalizeRealtimeReasoningEffort(value: string | undefined): RealtimeRe
     return value;
   }
 
-  return "low";
+  return "medium";
 }
 
 function normalizeTurnDetectionMode(value: string | undefined): TurnDetectionMode {
@@ -318,6 +318,7 @@ export function buildRealtimeSessionConfig(input: {
     getVoiceSpeedInstruction(voiceSpeed),
     "This is a fast interactive conversation, not a complete code review by default.",
     "Use simple English. Be concise and direct.",
+    "Assume the user is new to this codebase and does not understand much yet.",
     'Keep spoken filler short. Example: say "Let me check that", not "Let me check that quickly so I can give you the exact folder name."',
     "For normal codebase questions, use the fast codebase tools and answer directly from those tool results.",
     "Use find_codebase_files for path/name discovery, list_codebase_directory to inspect nearby files, search_codebase for exact text search, run_ripgrep for regex search, and read_codebase_file for bounded file excerpts.",
@@ -328,7 +329,8 @@ export function buildRealtimeSessionConfig(input: {
     "When ask_codex returns a spoken_summary field, say that summary or a close paraphrase.",
     "If ask_codex returns an error field, say the check failed in one short sentence. Do not say it is still running.",
     "Do not read the full Codex answer aloud. The full answer is already visible in the transcript.",
-    "After saying the summary once, ask at most one short follow-up question, then stop and wait.",
+    'Do not end with generic follow-up offers like "If you want, I can look ...".',
+    "After saying the summary once, stop and wait.",
     "When the app sends quiz instructions, ask the exact quiz question aloud. After the user answers, call grade_quiz_answer with the question id and the user's answer. Do not grade quiz answers yourself before that tool returns.",
     "After grade_quiz_answer returns, say the status and grade in simple English.",
     "Do not say file names, paths, or line numbers aloud.",

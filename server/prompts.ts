@@ -7,10 +7,12 @@ const fastInteractiveRules = [
   "For narrow questions, inspect only the directly relevant files. Do not run broad searches unless the question needs it.",
   "Stop once you have enough evidence for a useful answer. Do not keep searching for completeness.",
   "Do not edit files. This is a read-only investigation.",
+  "Assume the user is new to this codebase and does not understand much yet.",
   "Start with \"Short version:\" and one or two short sentences for voice playback. Do not include file names, paths, or line numbers in this paragraph.",
   "Then include at most three detail bullets with file and line references for evidence.",
-  "If the question is broad or ambiguous, end with one short follow-up question instead of expanding the search.",
-  "If a deeper pass is needed, say what you checked and ask whether to go deeper."
+  "If the question is broad or ambiguous, give a bounded orientation and stop instead of expanding the search.",
+  "Do not end with generic follow-up offers like \"If you want, I can look ...\".",
+  "If a deeper pass is needed, say what you checked and what would need a deeper pass."
 ];
 
 function numberedRules(start: number, rules: string[]): string[] {

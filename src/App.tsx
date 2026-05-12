@@ -111,6 +111,8 @@ type ActiveTab = "review" | "quiz";
 type QuizDifficulty = "easy" | "medium" | "hard";
 type QuizQuestionStatus = "pending" | "asking" | "listening" | "grading" | "graded";
 type QuizGradeStatus = "correct" | "partial" | "incorrect";
+type AuditPresetId = "threat-model" | "user-input";
+type AuditPresetStatus = "idle" | "loading" | "ready" | "error";
 
 const quizDifficultyOptions: Array<{ value: QuizDifficulty; label: string }> = [
   { value: "easy", label: "Easy" },
@@ -124,11 +126,18 @@ const wholeCodebaseComponent: QuizComponent = {
   description: "Questions can cover any part of the selected repo."
 };
 
+const auditPresetOptions: Array<{ id: AuditPresetId; label: string }> = [
+  { id: "threat-model", label: "Threat model" },
+  { id: "user-input", label: "User input" }
+];
+
 const defaultVoiceSystemPrompt = [
   "- When speaking, do not mention file names or line numbers.",
   "- Keep exact references in visible text only.",
   "- Use simple English, go straight to the point. Don't be fluffy.",
-  "- Keep answers short and interactive. For broad questions, give a quick orientation and ask one follow-up question.",
+  "- Assume the user is new to this codebase and does not understand much yet.",
+  '- Do not end with generic follow-up offers like "If you want, I can look ...".',
+  "- Keep answers short and interactive. For broad questions, give a quick orientation and stop after the useful answer.",
   '- Keep spoken filler short. Example: say "Let me check that", not "Let me check that quickly so I can give you the exact folder name."'
 ].join("\n");
 
@@ -179,13 +188,28 @@ interface QuizCodexPayload {
   usage?: CodexUsageRecord;
 }
 
+interface AuditPresetState {
+  status: AuditPresetStatus;
+  markdown: string;
+  error?: string;
+  updatedAt?: string;
+}
+
+interface AuditPresetResponse {
+  ok: boolean;
+  presetId: AuditPresetId;
+  answer?: string;
+  error?: string;
+  usage?: CodexUsageRecord;
+}
+
 export function App() {
   const [targetPath, setTargetPath] = useState("~/Desktop");
   const [validatedPath, setValidatedPath] = useState("");
   const [validatedPathInput, setValidatedPathInput] = useState("");
   const [activeTab, setActiveTab] = useState<ActiveTab>("review");
   const [reasoningEffort, setReasoningEffort] = useState<CodexReasoningEffort>("low");
-  const [realtimeReasoningEffort, setRealtimeReasoningEffort] = useState<RealtimeReasoningEffort>("low");
+  const [realtimeReasoningEffort, setRealtimeReasoningEffort] = useState<RealtimeReasoningEffort>("medium");
   const [voice, setVoice] = useState<RealtimeVoice>("marin");
   const [voiceSpeed, setVoiceSpeed] = useState<VoiceSpeed>("very-fast");
   const [turnDetectionMode, setTurnDetectionMode] = useState<TurnDetectionMode>("semantic-auto");
@@ -211,6 +235,10 @@ export function App() {
   const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false);
   const [isGradingQuiz, setIsGradingQuiz] = useState(false);
   const [quizError, setQuizError] = useState("");
+  const [auditPresetResults, setAuditPresetResults] = useState<Record<AuditPresetId, AuditPresetState>>(
+    createEmptyAuditPresetResults
+  );
+  const [openAuditPresetId, setOpenAuditPresetId] = useState<AuditPresetId | null>(null);
   const [darkMode, setDarkMode] = useState(false);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -227,8 +255,13 @@ export function App() {
   const activeQuizQuestionIdRef = useRef<string | null>(null);
   const handledToolCallIdsRef = useRef<Set<string>>(new Set());
   const assistantDeltaSourceRef = useRef<string | null>(null);
+  const validatedPathRef = useRef("");
+  const auditPresetRunning = useMemo(
+    () => auditPresetOptions.some((preset) => auditPresetResults[preset.id].status === "loading"),
+    [auditPresetResults]
+  );
   const activity = useMemo<VoiceActivity>(() => {
-    if (isAskingCodex) {
+    if (isAskingCodex || auditPresetRunning) {
       return "researching";
     }
 
@@ -241,7 +274,7 @@ export function App() {
     }
 
     return "idle";
-  }, [isAskingCodex, voiceActivity, voiceState]);
+  }, [auditPresetRunning, isAskingCodex, voiceActivity, voiceState]);
   const activityLabel = getActivityLabel(activity);
   const costSummary = useMemo(() => summarizeCostEntries(costEntries), [costEntries]);
   const latestCostEntries = useMemo(() => costEntries.slice(-3).reverse(), [costEntries]);
@@ -269,6 +302,10 @@ export function App() {
   useEffect(() => {
     activeQuizQuestionIdRef.current = activeQuizQuestionId;
   }, [activeQuizQuestionId]);
+
+  useEffect(() => {
+    validatedPathRef.current = validatedPath;
+  }, [validatedPath]);
 
   useEffect(() => {
     if (!codeViewer) {
@@ -486,6 +523,104 @@ export function App() {
       }
     ]);
   }, []);
+
+  const runAuditPreset = useCallback(
+    async (presetId: AuditPresetId, targetCodebasePath = validatedPath) => {
+      if (!targetCodebasePath) {
+        return;
+      }
+
+      setAuditPresetResults((current) => ({
+        ...current,
+        [presetId]: {
+          ...current[presetId],
+          status: "loading",
+          error: undefined
+        }
+      }));
+
+      try {
+        const response = await fetch("/api/audit/preset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ targetPath: targetCodebasePath, presetId })
+        });
+        const payload = (await response.json()) as AuditPresetResponse;
+
+        if (!response.ok || !payload.ok || !payload.answer) {
+          throw new Error(payload.error || "Audit preset could not be generated.");
+        }
+
+        const cached = {
+          markdown: payload.answer,
+          updatedAt: new Date().toISOString()
+        };
+        writeCachedAuditPreset(targetCodebasePath, presetId, cached);
+
+        if (payload.usage) {
+          addCostCalculation(calculateCodexCost(payload.usage));
+        }
+
+        if (validatedPathRef.current !== targetCodebasePath) {
+          return;
+        }
+
+        setAuditPresetResults((current) => ({
+          ...current,
+          [presetId]: {
+            status: "ready",
+            markdown: cached.markdown,
+            updatedAt: cached.updatedAt
+          }
+        }));
+      } catch (error) {
+        if (validatedPathRef.current !== targetCodebasePath) {
+          return;
+        }
+
+        setAuditPresetResults((current) => ({
+          ...current,
+          [presetId]: {
+            ...current[presetId],
+            status: "error",
+            error: error instanceof Error ? error.message : "Audit preset could not be generated."
+          }
+        }));
+      }
+    },
+    [addCostCalculation, validatedPath]
+  );
+
+  useEffect(() => {
+    if (!validatedPath) {
+      setAuditPresetResults(createEmptyAuditPresetResults());
+      setOpenAuditPresetId(null);
+      return;
+    }
+
+    const next = createEmptyAuditPresetResults();
+    const missingPresetIds: AuditPresetId[] = [];
+
+    auditPresetOptions.forEach((preset) => {
+      const cached = readCachedAuditPreset(validatedPath, preset.id);
+
+      if (cached) {
+        next[preset.id] = {
+          status: "ready",
+          markdown: cached.markdown,
+          updatedAt: cached.updatedAt
+        };
+        return;
+      }
+
+      missingPresetIds.push(preset.id);
+    });
+
+    setAuditPresetResults(next);
+    missingPresetIds.forEach((presetId) => {
+      void runAuditPreset(presetId, validatedPath);
+    });
+  }, [runAuditPreset, validatedPath]);
 
   async function validatePath(): Promise<string | null> {
     const requestedPath = targetPath.trim();
@@ -1492,7 +1627,12 @@ export function App() {
             <label className="field">
               <span className="label-with-help">
                 Turn
-                <span className="help-mark" title="Controls when the assistant decides you finished speaking.">
+                <span
+                  className="help-mark"
+                  tabIndex={0}
+                  aria-label="Controls when the assistant decides you finished speaking."
+                  data-tooltip="Controls when the assistant decides you finished speaking."
+                >
                   ?
                 </span>
               </span>
@@ -1512,7 +1652,12 @@ export function App() {
             <label className="field">
               <span className="label-with-help">
                 Truncation
-                <span className="help-mark" title="Controls how much old chat is kept when the session gets long.">
+                <span
+                  className="help-mark"
+                  tabIndex={0}
+                  aria-label="Controls how much old chat is kept when the session gets long."
+                  data-tooltip="Controls how much old chat is kept when the session gets long."
+                >
                   ?
                 </span>
               </span>
@@ -1657,7 +1802,7 @@ export function App() {
               <h2>{activeTab === "review" ? "Voice transcript" : "Codebase quiz"}</h2>
             </div>
             <div className="panel-header-actions">
-              {isAskingCodex ? <span className="busy-dot">Codex running</span> : null}
+              {isAskingCodex || auditPresetRunning ? <span className="busy-dot">Codex running</span> : null}
               {activeTab === "review" ? (
                 <button
                   className="secondary-action transcript-clear-button"
@@ -1747,7 +1892,104 @@ export function App() {
           />
         ) : null}
       </section>
+      <AuditPresetDock
+        validatedPath={validatedPath}
+        presets={auditPresetOptions}
+        results={auditPresetResults}
+        openPresetId={openAuditPresetId}
+        onOpenPreset={setOpenAuditPresetId}
+        onClose={() => setOpenAuditPresetId(null)}
+        onRefresh={(presetId) => runAuditPreset(presetId, validatedPath)}
+        onOpenFileReference={openFileReference}
+      />
     </main>
+  );
+}
+
+function AuditPresetDock({
+  validatedPath,
+  presets,
+  results,
+  openPresetId,
+  onOpenPreset,
+  onClose,
+  onRefresh,
+  onOpenFileReference
+}: {
+  validatedPath: string;
+  presets: Array<{ id: AuditPresetId; label: string }>;
+  results: Record<AuditPresetId, AuditPresetState>;
+  openPresetId: AuditPresetId | null;
+  onOpenPreset: (presetId: AuditPresetId) => void;
+  onClose: () => void;
+  onRefresh: (presetId: AuditPresetId) => void;
+  onOpenFileReference: (reference: FileReference) => void;
+}) {
+  const openPreset = presets.find((preset) => preset.id === openPresetId) ?? null;
+  const openResult = openPreset ? results[openPreset.id] : null;
+  const isThinking =
+    Boolean(validatedPath) &&
+    (!openResult || openResult.status === "idle" || openResult.status === "loading");
+
+  return (
+    <div className={`audit-preset-dock ${openPreset ? "open" : ""}`}>
+      <div className="audit-preset-rail" aria-label="Audit presets">
+        {presets.map((preset) => {
+          const result = results[preset.id];
+
+          return (
+            <button
+              key={preset.id}
+              className={`audit-preset-tab ${openPresetId === preset.id ? "active" : ""} ${result.status}`}
+              type="button"
+              onClick={() => onOpenPreset(preset.id)}
+              disabled={!validatedPath}
+            >
+              <span>{preset.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {openPreset ? (
+        <aside className="audit-preset-drawer" aria-label={`${openPreset.label} audit preset`}>
+          <div className="audit-preset-header">
+            <div>
+              <span>Audit preset</span>
+              <h2>{openPreset.label}</h2>
+            </div>
+            <div className="audit-preset-actions">
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => onRefresh(openPreset.id)}
+                disabled={!validatedPath || openResult?.status === "loading"}
+                aria-label={`Refresh ${openPreset.label}`}
+              >
+                <RefreshCw size={17} />
+              </button>
+              <button className="icon-button" type="button" onClick={onClose} aria-label="Close audit preset">
+                <X size={17} />
+              </button>
+            </div>
+          </div>
+
+          <div className="audit-preset-body">
+            {!validatedPath ? (
+              <div className="audit-preset-state">Validate a codebase first.</div>
+            ) : isThinking ? (
+              <div className="audit-preset-state">Thinking, wait please..</div>
+            ) : openResult?.status === "error" ? (
+              <pre className="audit-preset-error">{openResult.error}</pre>
+            ) : openResult?.markdown ? (
+              <MarkdownContent text={openResult.markdown} onOpenFileReference={onOpenFileReference} />
+            ) : (
+              <div className="audit-preset-state">No result yet.</div>
+            )}
+          </div>
+        </aside>
+      ) : null}
+    </div>
   );
 }
 
@@ -2350,6 +2592,58 @@ function decodeHref(href: string): string {
 
 function hasUrlScheme(value: string): boolean {
   return /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value);
+}
+
+function createEmptyAuditPresetResults(): Record<AuditPresetId, AuditPresetState> {
+  return {
+    "threat-model": {
+      status: "idle",
+      markdown: ""
+    },
+    "user-input": {
+      status: "idle",
+      markdown: ""
+    }
+  };
+}
+
+function getAuditPresetCacheKey(targetPath: string, presetId: AuditPresetId): string {
+  return `coread:audit-preset:v1:${presetId}:${targetPath}`;
+}
+
+function readCachedAuditPreset(
+  targetPath: string,
+  presetId: AuditPresetId
+): { markdown: string; updatedAt?: string } | undefined {
+  try {
+    const raw = localStorage.getItem(getAuditPresetCacheKey(targetPath, presetId));
+
+    if (!raw) {
+      return undefined;
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return undefined;
+    }
+
+    const object = parsed as Record<string, unknown>;
+    const markdown = typeof object.markdown === "string" ? object.markdown : "";
+    const updatedAt = typeof object.updatedAt === "string" ? object.updatedAt : undefined;
+
+    return markdown ? { markdown, updatedAt } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeCachedAuditPreset(
+  targetPath: string,
+  presetId: AuditPresetId,
+  value: { markdown: string; updatedAt: string }
+): void {
+  localStorage.setItem(getAuditPresetCacheKey(targetPath, presetId), JSON.stringify(value));
 }
 
 const languageByExtension: Record<string, string> = {
