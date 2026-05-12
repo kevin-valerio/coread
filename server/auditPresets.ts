@@ -65,7 +65,6 @@ const auditPresets: Record<AuditPresetId, AuditPreset> = {
       "2. Which of those skills apply best to this specific codebase after inspecting its language, framework, architecture, and attacker-controlled surfaces?",
       "",
       "Output Markdown with these sections:",
-      "Short answer",
       "Ranked useful skills",
       "Best security-bug skills",
       "Best fit for this codebase",
@@ -90,7 +89,7 @@ export async function runAuditPreset(targetPath: string, presetId: AuditPresetId
     targetPath,
     title: preset.title,
     question: preset.question,
-    reasoningEffort: "high",
+    reasoningEffort: "xhigh",
     model: "gpt-5.5"
   });
 }

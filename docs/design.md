@@ -26,11 +26,11 @@ The app must support follow-up questions inside one conversation. A single codeb
 12. The Realtime model speaks a concise answer for a user who is new to the codebase, avoids generic follow-up offers, and the UI stores the text transcript.
 13. The UI updates cost totals when Realtime or Codex reports token usage.
 14. If assistant Markdown contains a file link with a line reference, the user can open it in an in-app code side panel.
-15. After a path is validated, the browser starts the Threat model, User input, and Useful skills audit presets if that path does not already have cached markdown in localStorage.
+15. After a path is validated, the browser loads any cached Threat model, User input, and Useful skills audit preset markdown from localStorage. The user can click **Run audit presets** and confirm before Codex starts those preset runs.
 
 For explicit deep work, Realtime can still call `ask_codex`. The browser forwards that call to the local server, and the local server runs `codex exec` against the selected codebase with bounded read-only instructions.
 
-Audit presets use `POST /api/audit/preset`. The server runs Codex read-only with `gpt-5.5` and high reasoning. The browser stores the final markdown per validated codebase path and preset id in localStorage. The right-side preset drawer shows cached markdown, or `Thinking, wait please..` while the preset is still running. Refresh reruns only the selected preset and replaces the cached markdown. The Useful skills preset asks Codex to rank visible skills by security-bug value and fit for the selected codebase, without executing those skills.
+Audit presets use `POST /api/audit/preset`. The server runs Codex read-only with `gpt-5.5` and extra-high reasoning. The browser stores the final markdown per validated codebase path and preset id in localStorage. The right-side preset drawer shows cached markdown, or `Thinking, wait please..` while the preset is still running. The main **Run audit presets** button asks for confirmation and then runs Threat model, User input, and Useful skills, replacing cached markdown as each preset finishes. Refresh reruns only the selected preset and replaces the cached markdown. The Useful skills preset asks Codex to rank visible skills by security-bug value and fit for the selected codebase, without executing those skills.
 
 ## Follow-Up Context
 

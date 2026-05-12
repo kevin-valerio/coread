@@ -10,6 +10,7 @@ import {
   Moon,
   Play,
   RefreshCw,
+  Search,
   Square,
   Sun,
   Trash2,
@@ -695,7 +696,6 @@ export function App() {
     }
 
     const next = createEmptyAuditPresetResults();
-    const missingPresetIds: AuditPresetId[] = [];
 
     auditPresetOptions.forEach((preset) => {
       const cached = readCachedAuditPreset(validatedPath, preset.id);
@@ -708,15 +708,28 @@ export function App() {
         };
         return;
       }
-
-      missingPresetIds.push(preset.id);
     });
 
     setAuditPresetResults(next);
-    missingPresetIds.forEach((presetId) => {
-      void runAuditPreset(presetId, validatedPath);
+  }, [validatedPath]);
+
+  function runAuditPresetResearch() {
+    if (!validatedPath || auditPresetRunning) {
+      return;
+    }
+
+    const shouldRun = window.confirm(
+      "Run Threat model, User input, and Useful skills research now? This will use Codex and replace cached preset notes as each one finishes."
+    );
+
+    if (!shouldRun) {
+      return;
+    }
+
+    auditPresetOptions.forEach((preset) => {
+      void runAuditPreset(preset.id, validatedPath);
     });
-  }, [runAuditPreset, validatedPath]);
+  }
 
   async function validatePath(): Promise<string | null> {
     const requestedPath = targetPath.trim();
@@ -1842,6 +1855,16 @@ export function App() {
                 Stop voice
               </button>
             )}
+            <button
+              className="secondary-action"
+              type="button"
+              onClick={runAuditPresetResearch}
+              disabled={!validatedPath || auditPresetRunning}
+              title="Run audit preset research"
+            >
+              <Search size={18} />
+              {auditPresetRunning ? "Running audit presets" : "Run audit presets"}
+            </button>
           </div>
 
           <div className={`activity-card ${activity}`} aria-live="polite">
@@ -2037,9 +2060,7 @@ function AuditPresetDock({
 }) {
   const openPreset = presets.find((preset) => preset.id === openPresetId) ?? null;
   const openResult = openPreset ? results[openPreset.id] : null;
-  const isThinking =
-    Boolean(validatedPath) &&
-    (!openResult || openResult.status === "idle" || openResult.status === "loading");
+  const isThinking = Boolean(validatedPath) && openResult?.status === "loading";
 
   return (
     <div className={`audit-preset-dock ${openPreset ? "open" : ""}`}>
