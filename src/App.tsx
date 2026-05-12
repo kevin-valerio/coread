@@ -206,24 +206,60 @@ interface AuditPresetResponse {
   usage?: CodexUsageRecord;
 }
 
+interface UiSettings {
+  targetPath: string;
+  activeTab: ActiveTab;
+  reasoningEffort: CodexReasoningEffort;
+  realtimeReasoningEffort: RealtimeReasoningEffort;
+  voice: RealtimeVoice;
+  voiceSpeed: VoiceSpeed;
+  turnDetectionMode: TurnDetectionMode;
+  truncationMode: RealtimeTruncationMode;
+  darkMode: boolean;
+  quizDifficulty: QuizDifficulty;
+  quizQuestionCount: number;
+}
+
 const emptyAuditPresetState: AuditPresetState = {
   status: "idle",
   markdown: ""
 };
 
+const defaultUiSettings: UiSettings = {
+  targetPath: "~/Desktop",
+  activeTab: "review",
+  reasoningEffort: "low",
+  realtimeReasoningEffort: "medium",
+  voice: "marin",
+  voiceSpeed: "very-fast",
+  turnDetectionMode: "semantic-auto",
+  truncationMode: "auto",
+  darkMode: false,
+  quizDifficulty: "medium",
+  quizQuestionCount: 10
+};
+
 export function App() {
-  const [targetPath, setTargetPath] = useState("~/Desktop");
+  const [targetPath, setTargetPath] = useState(defaultUiSettings.targetPath);
   const [validatedPath, setValidatedPath] = useState("");
   const [validatedPathInput, setValidatedPathInput] = useState("");
-  const [activeTab, setActiveTab] = useState<ActiveTab>("review");
-  const [reasoningEffort, setReasoningEffort] = useState<CodexReasoningEffort>("low");
-  const [realtimeReasoningEffort, setRealtimeReasoningEffort] = useState<RealtimeReasoningEffort>("medium");
-  const [voice, setVoice] = useState<RealtimeVoice>("marin");
-  const [voiceSpeed, setVoiceSpeed] = useState<VoiceSpeed>("very-fast");
-  const [turnDetectionMode, setTurnDetectionMode] = useState<TurnDetectionMode>("semantic-auto");
-  const [truncationMode, setTruncationMode] = useState<RealtimeTruncationMode>("auto");
+  const [activeTab, setActiveTab] = useState<ActiveTab>(defaultUiSettings.activeTab);
+  const [reasoningEffort, setReasoningEffort] = useState<CodexReasoningEffort>(
+    defaultUiSettings.reasoningEffort
+  );
+  const [realtimeReasoningEffort, setRealtimeReasoningEffort] =
+    useState<RealtimeReasoningEffort>(defaultUiSettings.realtimeReasoningEffort);
+  const [voice, setVoice] = useState<RealtimeVoice>(defaultUiSettings.voice);
+  const [voiceSpeed, setVoiceSpeed] = useState<VoiceSpeed>(defaultUiSettings.voiceSpeed);
+  const [turnDetectionMode, setTurnDetectionMode] = useState<TurnDetectionMode>(
+    defaultUiSettings.turnDetectionMode
+  );
+  const [truncationMode, setTruncationMode] = useState<RealtimeTruncationMode>(
+    defaultUiSettings.truncationMode
+  );
   const [voiceSystemPrompt, setVoiceSystemPrompt] = useState(defaultVoiceSystemPrompt);
   const [voiceSystemPromptLoaded, setVoiceSystemPromptLoaded] = useState(false);
+  const [uiSettingsLoaded, setUiSettingsLoaded] = useState(false);
   const [conversation, setConversation] = useState<ConversationRecord | null>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceActivity, setVoiceActivity] = useState<VoiceActivity>("idle");
@@ -236,8 +272,8 @@ export function App() {
   const [codeViewerWidth, setCodeViewerWidth] = useState(defaultCodeViewerWidth);
   const [quizComponents, setQuizComponents] = useState<QuizComponent[]>([]);
   const [selectedQuizComponentId, setSelectedQuizComponentId] = useState(wholeCodebaseComponent.id);
-  const [quizDifficulty, setQuizDifficulty] = useState<QuizDifficulty>("medium");
-  const [quizQuestionCount, setQuizQuestionCount] = useState(10);
+  const [quizDifficulty, setQuizDifficulty] = useState<QuizDifficulty>(defaultUiSettings.quizDifficulty);
+  const [quizQuestionCount, setQuizQuestionCount] = useState(defaultUiSettings.quizQuestionCount);
   const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
   const [activeQuizQuestionId, setActiveQuizQuestionId] = useState<string | null>(null);
   const [isLoadingQuizComponents, setIsLoadingQuizComponents] = useState(false);
@@ -248,7 +284,7 @@ export function App() {
     createEmptyAuditPresetResults
   );
   const [openAuditPresetId, setOpenAuditPresetId] = useState<AuditPresetId | null>(null);
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(defaultUiSettings.darkMode);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -259,6 +295,11 @@ export function App() {
   const pendingVoiceSystemPromptRef = useRef(defaultVoiceSystemPrompt);
   const pendingVoiceSystemPromptUpdatedAtRef = useRef(new Date(0).toISOString());
   const voiceSystemPromptSaveErrorRef = useRef("");
+  const uiSettingsSaveTimerRef = useRef<number | undefined>(undefined);
+  const lastSavedUiSettingsJsonRef = useRef(JSON.stringify(defaultUiSettings));
+  const pendingUiSettingsRef = useRef<UiSettings>(defaultUiSettings);
+  const pendingUiSettingsUpdatedAtRef = useRef(new Date(0).toISOString());
+  const uiSettingsSaveErrorRef = useRef("");
   const microphoneTracksRef = useRef<MediaStreamTrack[]>([]);
   const microphoneEnableTimerRef = useRef<number | undefined>(undefined);
   const microphoneMeterRef = useRef<HTMLDivElement | null>(null);
@@ -298,6 +339,34 @@ export function App() {
   const quizComponentOptions = useMemo(
     () => [wholeCodebaseComponent, ...quizComponents],
     [quizComponents]
+  );
+  const currentUiSettings = useMemo<UiSettings>(
+    () => ({
+      targetPath,
+      activeTab,
+      reasoningEffort,
+      realtimeReasoningEffort,
+      voice,
+      voiceSpeed,
+      turnDetectionMode,
+      truncationMode,
+      darkMode,
+      quizDifficulty,
+      quizQuestionCount
+    }),
+    [
+      activeTab,
+      darkMode,
+      quizDifficulty,
+      quizQuestionCount,
+      reasoningEffort,
+      realtimeReasoningEffort,
+      targetPath,
+      truncationMode,
+      turnDetectionMode,
+      voice,
+      voiceSpeed
+    ]
   );
   const workspaceStyle = codeViewer
     ? ({
@@ -350,6 +419,144 @@ export function App() {
       }
     ]);
   }, []);
+
+  function updatePendingUiSettings(patch: Partial<UiSettings>) {
+    pendingUiSettingsRef.current = {
+      ...pendingUiSettingsRef.current,
+      ...patch
+    };
+    pendingUiSettingsUpdatedAtRef.current = new Date().toISOString();
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadUiSettings() {
+      try {
+        const response = await fetch("/api/settings/ui");
+
+        if (!response.ok) {
+          throw new Error(await readResponseError(response));
+        }
+
+        const payload = await readJsonResponse<{
+          ok: boolean;
+          settings?: Record<string, unknown>;
+          updatedAt?: string;
+        }>(response, "UI settings could not be loaded.");
+        const storedSettings = normalizeUiSettings(payload.settings);
+
+        if (cancelled) {
+          return;
+        }
+
+        pendingUiSettingsRef.current = storedSettings;
+        pendingUiSettingsUpdatedAtRef.current = payload.updatedAt ?? new Date(0).toISOString();
+        lastSavedUiSettingsJsonRef.current = JSON.stringify(storedSettings);
+        setTargetPath(storedSettings.targetPath);
+        setActiveTab(storedSettings.activeTab);
+        setReasoningEffort(storedSettings.reasoningEffort);
+        setRealtimeReasoningEffort(storedSettings.realtimeReasoningEffort);
+        setVoice(storedSettings.voice);
+        setVoiceSpeed(storedSettings.voiceSpeed);
+        setTurnDetectionMode(storedSettings.turnDetectionMode);
+        setTruncationMode(storedSettings.truncationMode);
+        setDarkMode(storedSettings.darkMode);
+        setQuizDifficulty(storedSettings.quizDifficulty);
+        setQuizQuestionCount(storedSettings.quizQuestionCount);
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : "UI settings could not be loaded.";
+          addTranscript("error", message);
+        }
+      } finally {
+        if (!cancelled) {
+          setUiSettingsLoaded(true);
+        }
+      }
+    }
+
+    void loadUiSettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [addTranscript]);
+
+  useEffect(() => {
+    if (!uiSettingsLoaded) {
+      return;
+    }
+
+    pendingUiSettingsRef.current = currentUiSettings;
+    const settingsJson = JSON.stringify(currentUiSettings);
+
+    if (settingsJson === lastSavedUiSettingsJsonRef.current) {
+      return;
+    }
+
+    if (uiSettingsSaveTimerRef.current !== undefined) {
+      window.clearTimeout(uiSettingsSaveTimerRef.current);
+    }
+
+    const settings = currentUiSettings;
+    const updatedAt = pendingUiSettingsUpdatedAtRef.current;
+
+    uiSettingsSaveTimerRef.current = window.setTimeout(() => {
+      uiSettingsSaveTimerRef.current = undefined;
+      saveUiSettings(settings, updatedAt)
+        .then(() => {
+          if (pendingUiSettingsUpdatedAtRef.current === updatedAt) {
+            lastSavedUiSettingsJsonRef.current = JSON.stringify(settings);
+          }
+
+          uiSettingsSaveErrorRef.current = "";
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : "UI settings could not be saved.";
+
+          if (uiSettingsSaveErrorRef.current !== message) {
+            uiSettingsSaveErrorRef.current = message;
+            addTranscript("error", message);
+          }
+        });
+    }, 250);
+
+    return () => {
+      if (uiSettingsSaveTimerRef.current !== undefined) {
+        window.clearTimeout(uiSettingsSaveTimerRef.current);
+        uiSettingsSaveTimerRef.current = undefined;
+      }
+    };
+  }, [addTranscript, currentUiSettings, uiSettingsLoaded]);
+
+  useEffect(() => {
+    if (!uiSettingsLoaded) {
+      return;
+    }
+
+    const saveBeforeUnload = () => {
+      if (uiSettingsSaveTimerRef.current !== undefined) {
+        window.clearTimeout(uiSettingsSaveTimerRef.current);
+        uiSettingsSaveTimerRef.current = undefined;
+      }
+
+      const settings = pendingUiSettingsRef.current;
+      const settingsJson = JSON.stringify(settings);
+
+      if (settingsJson === lastSavedUiSettingsJsonRef.current) {
+        return;
+      }
+
+      if (sendUiSettingsBeacon(settings, pendingUiSettingsUpdatedAtRef.current)) {
+        lastSavedUiSettingsJsonRef.current = settingsJson;
+      }
+    };
+
+    window.addEventListener("pagehide", saveBeforeUnload);
+
+    return () => window.removeEventListener("pagehide", saveBeforeUnload);
+  }, [uiSettingsLoaded]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1034,6 +1241,7 @@ export function App() {
     }
 
     const activeConversation = await ensureConversation();
+    updatePendingUiSettings({ activeTab: "quiz" });
     setActiveTab("quiz");
     setIsLoadingQuizComponents(true);
     setIsAskingCodex(true);
@@ -1082,6 +1290,7 @@ export function App() {
     const component =
       quizComponentOptions.find((option) => option.id === selectedQuizComponentId) ?? wholeCodebaseComponent;
 
+    updatePendingUiSettings({ activeTab: "quiz" });
     setActiveTab("quiz");
     setIsGeneratingQuiz(true);
     setIsAskingCodex(true);
@@ -1843,7 +2052,11 @@ export function App() {
             <button
               className="icon-button theme-toggle"
               type="button"
-              onClick={() => setDarkMode((enabled) => !enabled)}
+              onClick={() => {
+                const nextDarkMode = !darkMode;
+                updatePendingUiSettings({ darkMode: nextDarkMode });
+                setDarkMode(nextDarkMode);
+              }}
               title={darkMode ? "Use light mode" : "Use dark mode"}
               aria-label={darkMode ? "Use light mode" : "Use dark mode"}
               aria-pressed={darkMode}
@@ -1859,7 +2072,9 @@ export function App() {
                 name="targetPath"
                 value={targetPath}
                 onChange={(event) => {
-                  setTargetPath(event.target.value);
+                  const nextTargetPath = event.target.value;
+                  updatePendingUiSettings({ targetPath: nextTargetPath });
+                  setTargetPath(nextTargetPath);
                   setValidatedPath("");
                   setValidatedPathInput("");
                   setConversation(null);
@@ -1884,7 +2099,11 @@ export function App() {
               <select
                 name="realtimeReasoningEffort"
                 value={realtimeReasoningEffort}
-                onChange={(event) => setRealtimeReasoningEffort(event.target.value as RealtimeReasoningEffort)}
+                onChange={(event) => {
+                  const nextReasoningEffort = event.target.value as RealtimeReasoningEffort;
+                  updatePendingUiSettings({ realtimeReasoningEffort: nextReasoningEffort });
+                  setRealtimeReasoningEffort(nextReasoningEffort);
+                }}
               >
                 {reasoningOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -1899,7 +2118,11 @@ export function App() {
               <select
                 name="reasoningEffort"
                 value={reasoningEffort}
-                onChange={(event) => setReasoningEffort(event.target.value as CodexReasoningEffort)}
+                onChange={(event) => {
+                  const nextReasoningEffort = event.target.value as CodexReasoningEffort;
+                  updatePendingUiSettings({ reasoningEffort: nextReasoningEffort });
+                  setReasoningEffort(nextReasoningEffort);
+                }}
               >
                 {reasoningOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -1914,7 +2137,11 @@ export function App() {
               <select
                 name="voiceSpeed"
                 value={voiceSpeed}
-                onChange={(event) => setVoiceSpeed(event.target.value as VoiceSpeed)}
+                onChange={(event) => {
+                  const nextVoiceSpeed = event.target.value as VoiceSpeed;
+                  updatePendingUiSettings({ voiceSpeed: nextVoiceSpeed });
+                  setVoiceSpeed(nextVoiceSpeed);
+                }}
               >
                 {voiceSpeedOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -1939,7 +2166,11 @@ export function App() {
               <select
                 name="turnDetectionMode"
                 value={turnDetectionMode}
-                onChange={(event) => setTurnDetectionMode(event.target.value as TurnDetectionMode)}
+                onChange={(event) => {
+                  const nextTurnDetectionMode = event.target.value as TurnDetectionMode;
+                  updatePendingUiSettings({ turnDetectionMode: nextTurnDetectionMode });
+                  setTurnDetectionMode(nextTurnDetectionMode);
+                }}
               >
                 {turnDetectionOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -1964,7 +2195,11 @@ export function App() {
               <select
                 name="truncationMode"
                 value={truncationMode}
-                onChange={(event) => setTruncationMode(event.target.value as RealtimeTruncationMode)}
+                onChange={(event) => {
+                  const nextTruncationMode = event.target.value as RealtimeTruncationMode;
+                  updatePendingUiSettings({ truncationMode: nextTruncationMode });
+                  setTruncationMode(nextTruncationMode);
+                }}
               >
                 {truncationOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -1981,8 +2216,10 @@ export function App() {
                   name="voice"
                   value={voice}
                   onChange={(event) => {
+                    const nextVoice = event.target.value as RealtimeVoice;
                     stopVoicePreview();
-                    setVoice(event.target.value as RealtimeVoice);
+                    updatePendingUiSettings({ voice: nextVoice });
+                    setVoice(nextVoice);
                   }}
                 >
                   {voiceOptions.map((option) => (
@@ -2129,7 +2366,10 @@ export function App() {
                   role="tab"
                   aria-selected={activeTab === "review"}
                   className={activeTab === "review" ? "active" : ""}
-                  onClick={() => setActiveTab("review")}
+                  onClick={() => {
+                    updatePendingUiSettings({ activeTab: "review" });
+                    setActiveTab("review");
+                  }}
                 >
                   Voice
                 </button>
@@ -2138,7 +2378,10 @@ export function App() {
                   role="tab"
                   aria-selected={activeTab === "quiz"}
                   className={activeTab === "quiz" ? "active" : ""}
-                  onClick={() => setActiveTab("quiz")}
+                  onClick={() => {
+                    updatePendingUiSettings({ activeTab: "quiz" });
+                    setActiveTab("quiz");
+                  }}
                 >
                   Quiz
                 </button>
@@ -2184,8 +2427,14 @@ export function App() {
               error={quizError}
               onLoadComponents={loadQuizComponents}
               onSelectComponent={setSelectedQuizComponentId}
-              onChangeDifficulty={setQuizDifficulty}
-              onChangeQuestionCount={setQuizQuestionCount}
+              onChangeDifficulty={(difficulty) => {
+                updatePendingUiSettings({ quizDifficulty: difficulty });
+                setQuizDifficulty(difficulty);
+              }}
+              onChangeQuestionCount={(count) => {
+                updatePendingUiSettings({ quizQuestionCount: count });
+                setQuizQuestionCount(count);
+              }}
               onGenerateQuestions={generateQuizRound}
               onAskQuestion={askQuizQuestionByVoice}
               onOpenFileReference={openFileReference}
@@ -2827,6 +3076,43 @@ async function postJson(url: string, body: unknown): Promise<unknown> {
   return readJsonResponse(response, "Request failed.");
 }
 
+async function saveUiSettings(settings: UiSettings, updatedAt: string): Promise<void> {
+  const response = await fetch("/api/settings/ui", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ settings, updatedAt })
+  });
+
+  if (!response.ok) {
+    throw new Error(await readResponseError(response));
+  }
+
+  const payload = await readJsonResponse<{ ok: boolean; error?: string }>(
+    response,
+    "UI settings could not be saved."
+  );
+
+  if (!payload.ok) {
+    throw new Error(payload.error || "UI settings could not be saved.");
+  }
+}
+
+function sendUiSettingsBeacon(settings: UiSettings, updatedAt: string): boolean {
+  const body = JSON.stringify({ settings, updatedAt });
+
+  if (navigator.sendBeacon) {
+    return navigator.sendBeacon("/api/settings/ui", new Blob([body], { type: "application/json" }));
+  }
+
+  void fetch("/api/settings/ui", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    keepalive: true
+  });
+  return true;
+}
+
 async function saveVoiceSystemPrompt(voiceSystemPrompt: string, updatedAt: string): Promise<void> {
   const response = await fetch("/api/system-prompts/voice", {
     method: "POST",
@@ -2865,6 +3151,92 @@ function sendVoiceSystemPromptBeacon(voiceSystemPrompt: string, updatedAt: strin
     keepalive: true
   });
   return true;
+}
+
+function normalizeUiSettings(value: unknown): UiSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return defaultUiSettings;
+  }
+
+  const object = value as Record<string, unknown>;
+
+  return {
+    targetPath: typeof object.targetPath === "string" ? object.targetPath : defaultUiSettings.targetPath,
+    activeTab: isActiveTab(object.activeTab) ? object.activeTab : defaultUiSettings.activeTab,
+    reasoningEffort: isReasoningEffort(object.reasoningEffort)
+      ? object.reasoningEffort
+      : defaultUiSettings.reasoningEffort,
+    realtimeReasoningEffort: isReasoningEffort(object.realtimeReasoningEffort)
+      ? object.realtimeReasoningEffort
+      : defaultUiSettings.realtimeReasoningEffort,
+    voice: isRealtimeVoice(object.voice) ? object.voice : defaultUiSettings.voice,
+    voiceSpeed: isVoiceSpeed(object.voiceSpeed) ? object.voiceSpeed : defaultUiSettings.voiceSpeed,
+    turnDetectionMode: isTurnDetectionMode(object.turnDetectionMode)
+      ? object.turnDetectionMode
+      : defaultUiSettings.turnDetectionMode,
+    truncationMode: isTruncationMode(object.truncationMode)
+      ? object.truncationMode
+      : defaultUiSettings.truncationMode,
+    darkMode: typeof object.darkMode === "boolean" ? object.darkMode : defaultUiSettings.darkMode,
+    quizDifficulty: isQuizDifficulty(object.quizDifficulty)
+      ? object.quizDifficulty
+      : defaultUiSettings.quizDifficulty,
+    quizQuestionCount:
+      typeof object.quizQuestionCount === "number"
+        ? clampQuestionCount(String(object.quizQuestionCount))
+        : defaultUiSettings.quizQuestionCount
+  };
+}
+
+function isActiveTab(value: unknown): value is ActiveTab {
+  return value === "review" || value === "quiz";
+}
+
+function isReasoningEffort(value: unknown): value is CodexReasoningEffort {
+  return (
+    value === "minimal" ||
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "xhigh"
+  );
+}
+
+function isRealtimeVoice(value: unknown): value is RealtimeVoice {
+  return (
+    value === "alloy" ||
+    value === "ash" ||
+    value === "ballad" ||
+    value === "coral" ||
+    value === "echo" ||
+    value === "sage" ||
+    value === "shimmer" ||
+    value === "verse" ||
+    value === "marin" ||
+    value === "cedar"
+  );
+}
+
+function isVoiceSpeed(value: unknown): value is VoiceSpeed {
+  return value === "slow" || value === "normal" || value === "fast" || value === "very-fast";
+}
+
+function isTurnDetectionMode(value: unknown): value is TurnDetectionMode {
+  return (
+    value === "semantic-auto" ||
+    value === "semantic-low" ||
+    value === "semantic-high" ||
+    value === "server-balanced" ||
+    value === "server-fast"
+  );
+}
+
+function isTruncationMode(value: unknown): value is RealtimeTruncationMode {
+  return value === "auto" || value === "cost" || value === "short" || value === "disabled";
+}
+
+function isQuizDifficulty(value: unknown): value is QuizDifficulty {
+  return value === "easy" || value === "medium" || value === "hard";
 }
 
 function readRealtimeErrorMessage(event: Record<string, unknown>): string {
