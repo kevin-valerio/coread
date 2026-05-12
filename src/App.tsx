@@ -26,7 +26,7 @@ import {
   summarizeCostEntries
 } from "../shared/cost";
 import type { CodexUsageRecord, CostCalculation, CostEntry } from "../shared/cost";
-import { buildCodexVoiceToolOutput } from "./codexVoiceOutput";
+import { buildCodexVoiceToolError, buildCodexVoiceToolOutput } from "./codexVoiceOutput";
 import type {
   CodexAnswer,
   CodexProgressEvent,
@@ -102,8 +102,9 @@ const wholeCodebaseComponent: QuizComponent = {
 
 const defaultVoiceSystemPrompt = [
   "- When speaking, do not mention file names or line numbers.",
-  "- Keep exact references in the visible Codex output.",
+  "- Keep exact references in visible text only.",
   "- Use simple English, go straight to the point. Don't be fluffy.",
+  "- Keep answers short and interactive. For broad questions, give a quick orientation and ask one follow-up question.",
   '- Keep spoken filler short. Example: say "Let me check that", not "Let me check that quickly so I can give you the exact folder name."'
 ].join("\n");
 
@@ -159,7 +160,7 @@ export function App() {
   const [validatedPath, setValidatedPath] = useState("");
   const [validatedPathInput, setValidatedPathInput] = useState("");
   const [activeTab, setActiveTab] = useState<ActiveTab>("review");
-  const [reasoningEffort, setReasoningEffort] = useState<CodexReasoningEffort>("medium");
+  const [reasoningEffort, setReasoningEffort] = useState<CodexReasoningEffort>("low");
   const [voice, setVoice] = useState<RealtimeVoice>("marin");
   const [voiceSpeed, setVoiceSpeed] = useState<VoiceSpeed>("very-fast");
   const [voiceSystemPrompt, setVoiceSystemPrompt] = useState(defaultVoiceSystemPrompt);
@@ -194,6 +195,7 @@ export function App() {
   const quizQuestionsRef = useRef<QuizQuestion[]>([]);
   const activeQuizQuestionIdRef = useRef<string | null>(null);
   const handledToolCallIdsRef = useRef<Set<string>>(new Set());
+  const assistantDeltaSourceRef = useRef<string | null>(null);
   const activity = useMemo<VoiceActivity>(() => {
     if (isAskingCodex) {
       return "researching";
@@ -281,6 +283,10 @@ export function App() {
       const last = items.at(-1);
 
       if (last?.role === "assistant" && last.streaming) {
+        if (text.length >= 20 && last.text.endsWith(text)) {
+          return items;
+        }
+
         return [...items.slice(0, -1), { ...last, text: `${last.text}${text}` }];
       }
 
@@ -306,6 +312,18 @@ export function App() {
       }
 
       return [...items.slice(0, -1), { ...last, streaming: false }];
+    });
+  }, []);
+
+  const dropAssistantStream = useCallback(() => {
+    setTranscript((items) => {
+      const last = items.at(-1);
+
+      if (last?.role !== "assistant" || !last.streaming) {
+        return items;
+      }
+
+      return items.slice(0, -1);
     });
   }, []);
 
@@ -455,7 +473,7 @@ export function App() {
         const base = current ?? activeConversation;
         return { ...base, codexSessionId: payload.codexSessionId, turns: base.turns + 1 };
       });
-      addTranscript("assistant", payload.answer);
+      addTranscript("status", payload.answer);
       return payload;
     } finally {
       setIsAskingCodex(false);
@@ -899,6 +917,7 @@ export function App() {
 
     if (type === "error" || type.endsWith("_error")) {
       addTranscript("error", readRealtimeErrorMessage(event));
+      assistantDeltaSourceRef.current = null;
       scheduleMicrophoneEnable();
       setVoiceActivity("waiting");
       return;
@@ -934,14 +953,26 @@ export function App() {
       return;
     }
 
-    if (
-      type === "response.output_text.delta" ||
-      type === "response.text.delta" ||
-      type === "response.audio_transcript.delta" ||
-      type === "response.output_audio_transcript.delta"
-    ) {
+    const isAudioTranscriptDelta =
+      type === "response.audio_transcript.delta" || type === "response.output_audio_transcript.delta";
+    const isTextTranscriptDelta = type === "response.output_text.delta" || type === "response.text.delta";
+
+    if (isAudioTranscriptDelta || isTextTranscriptDelta) {
       const delta = String(event.delta ?? "");
       if (delta) {
+        const currentDeltaSource = assistantDeltaSourceRef.current;
+        const currentSourceIsText =
+          currentDeltaSource === "response.output_text.delta" || currentDeltaSource === "response.text.delta";
+
+        if (isAudioTranscriptDelta && currentDeltaSource && currentDeltaSource !== type && currentSourceIsText) {
+          dropAssistantStream();
+          assistantDeltaSourceRef.current = type;
+        } else if (!currentDeltaSource) {
+          assistantDeltaSourceRef.current = type;
+        } else if (currentDeltaSource !== type) {
+          return;
+        }
+
         setMicrophoneEnabled(false);
         setVoiceActivity("speaking");
         appendAssistantDelta(delta);
@@ -969,6 +1000,7 @@ export function App() {
       }
 
       finishAssistantStream();
+      assistantDeltaSourceRef.current = null;
       const questionId = activeQuizQuestionIdRef.current;
 
       if (questionId) {
@@ -1000,6 +1032,15 @@ export function App() {
       return;
     }
 
+    if (
+      toolCall.name === "get_codebase_overview" ||
+      toolCall.name === "search_codebase" ||
+      toolCall.name === "read_codebase_file"
+    ) {
+      await answerFastCodebaseToolCall(toolCall, activeConversation);
+      return;
+    }
+
     if (toolCall.name !== "ask_codex") {
       return;
     }
@@ -1008,11 +1049,22 @@ export function App() {
       question?: string;
       conversation_id?: string;
     };
-    const toolQuestion = args.question?.trim() || "Investigate the selected codebase.";
-    const result = await askCodex(toolQuestion, {
+    const toolConversation = {
       ...activeConversation,
       id: args.conversation_id || activeConversation.id
-    });
+    };
+    const toolQuestion = args.question?.trim() || "Investigate the selected codebase.";
+    let output: string;
+
+    try {
+      const result = await askCodex(toolQuestion, toolConversation);
+      output = JSON.stringify(buildCodexVoiceToolOutput(result));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Codex request failed.";
+      addTranscript("error", message);
+      output = JSON.stringify(buildCodexVoiceToolError(message, toolConversation.id));
+    }
+
     const channel = dataChannelRef.current;
 
     if (!channel || channel.readyState !== "open") {
@@ -1025,11 +1077,79 @@ export function App() {
         item: {
           type: "function_call_output",
           call_id: toolCall.callId,
-          output: JSON.stringify(buildCodexVoiceToolOutput(result))
+          output
         }
       })
     );
     createAssistantResponse(channel);
+  }
+
+  async function answerFastCodebaseToolCall(
+    toolCall: PendingToolCall,
+    activeConversation: ConversationRecord
+  ) {
+    const channel = dataChannelRef.current;
+
+    if (!channel || channel.readyState !== "open") {
+      return;
+    }
+
+    let output: string;
+
+    try {
+      output = JSON.stringify(await runFastCodebaseTool(toolCall, activeConversation));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Codebase tool failed.";
+      addTranscript("error", message);
+      output = JSON.stringify({ error: message });
+    }
+
+    channel.send(
+      JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: toolCall.callId,
+          output
+        }
+      })
+    );
+    createAssistantResponse(channel);
+  }
+
+  async function runFastCodebaseTool(
+    toolCall: PendingToolCall,
+    activeConversation: ConversationRecord
+  ): Promise<unknown> {
+    const args = JSON.parse(toolCall.argumentsText || "{}") as {
+      query?: string;
+      max_results?: number;
+      file_path?: string;
+      start_line?: number;
+      line_count?: number;
+    };
+    const activeTargetPath = activeConversation.targetPath || validatedPath;
+
+    if (toolCall.name === "get_codebase_overview") {
+      return postJson("/api/codebase/overview", {
+        targetPath: activeTargetPath
+      });
+    }
+
+    if (toolCall.name === "search_codebase") {
+      return postJson("/api/codebase/search", {
+        targetPath: activeTargetPath,
+        query: args.query ?? "",
+        maxResults: args.max_results
+      });
+    }
+
+    return postJson("/api/codebase/read", {
+      targetPath: activeTargetPath,
+      filePath: args.file_path ?? "",
+      startLine: args.start_line,
+      lineCount: args.line_count
+    });
   }
 
   async function answerQuizGradeToolCall(
@@ -1308,14 +1428,14 @@ export function App() {
 
           <div className="session-meta">
             <span>Codex session</span>
-            <strong>{conversation?.codexSessionId || "Created after first question"}</strong>
+            <strong>{conversation?.codexSessionId || "Created after deep Codex check"}</strong>
           </div>
         </aside>
 
         <section className="review-panel" aria-label={activeTab === "review" ? "Question transcript" : "Codebase quiz"}>
           <div className="transcript-header">
             <div>
-              <h2>{activeTab === "review" ? "Voice and Codex output" : "Codebase quiz"}</h2>
+              <h2>{activeTab === "review" ? "Voice transcript" : "Codebase quiz"}</h2>
             </div>
             <div className="panel-header-actions">
               {isAskingCodex ? <span className="busy-dot">Codex running</span> : null}
@@ -1893,6 +2013,20 @@ async function readResponseError(response: Response): Promise<string> {
   }
 
   return (await response.text()) || response.statusText;
+}
+
+async function postJson(url: string, body: unknown): Promise<unknown> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    throw new Error(await readResponseError(response));
+  }
+
+  return response.json();
 }
 
 function readRealtimeErrorMessage(event: Record<string, unknown>): string {

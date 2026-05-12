@@ -4,7 +4,9 @@ This document describes the first local version of coread.
 
 ## Goal
 
-Build a local app where a user can ask voice questions about a codebase and get a real-time spoken answer backed by Codex investigation.
+Build a local app where a user can ask voice questions about a codebase and get a real-time spoken answer backed by local codebase evidence.
+
+Normal questions should use fast local file tools directly from the Realtime model. Codex is reserved for explicit deep passes, bug hunts, and security reviews.
 
 The app must support follow-up questions inside one conversation. A single codebase can have many conversations, usually one conversation per topic.
 
@@ -13,17 +15,19 @@ The app must support follow-up questions inside one conversation. A single codeb
 1. The user starts the local web app.
 2. The user enters a local codebase path.
 3. The local server validates that the path exists and is a directory.
-4. The user chooses Codex reasoning amount, previews and selects a Realtime voice, chooses voice speed, and optional voice instructions.
+4. The user chooses Codex reasoning amount, previews and selects a Realtime voice, chooses voice speed, and optional voice instructions. Codex reasoning defaults to `low` for deeper investigations.
 5. The user starts voice.
 6. The browser opens a WebRTC session to `gpt-realtime-2` through the local server.
 7. The user asks a question by microphone.
-8. The Realtime model calls the `ask_codex` tool when it needs codebase evidence.
+8. The Realtime model calls fast local tools when it needs codebase evidence.
 9. The browser forwards the tool call to the local server.
-10. The local server runs `codex exec` against the selected codebase.
-11. The browser returns the Codex result to the Realtime session.
-12. The Realtime model speaks a concise answer and the UI stores the text transcript.
+10. The local server returns a bounded overview, search results, or a file excerpt.
+11. The browser returns that tool result to the Realtime session.
+12. The Realtime model speaks a concise answer, asks at most one follow-up question, and the UI stores the text transcript.
 13. The UI updates cost totals when Realtime or Codex reports token usage.
 14. If assistant Markdown contains a file link with a line reference, the user can open it in an in-app code side panel.
+
+For explicit deep work, Realtime can still call `ask_codex`. The browser forwards that call to the local server, and the local server runs `codex exec` against the selected codebase with bounded read-only instructions.
 
 ## Follow-Up Context
 
@@ -41,7 +45,7 @@ For later questions in the same conversation, the server runs:
 codex exec resume <session-id> --json -c sandbox_mode="read-only" -c model_reasoning_effort="<effort>" -o <output-file> -
 ```
 
-Both commands include a `model_reasoning_effort` config override from the UI.
+Both commands include a `model_reasoning_effort` config override from the UI. New conversations default to `low`; users can choose higher effort when they want a deeper pass.
 
 See `docs/codex-bridge-investigation.md` for the current bridge tradeoff. `codex exec resume` works, but app-server is the better long-term bridge for lower-latency voice sessions.
 
@@ -66,7 +70,7 @@ The local server receives the SDP plus local session settings:
   "sdp": "v=0...",
   "targetPath": "/Users/example/project",
   "conversationId": "local-conversation-id",
-  "reasoningEffort": "medium",
+  "reasoningEffort": "low",
   "voice": "marin",
   "voiceSpeed": "very-fast",
   "voiceSystemPrompt": "Answer in very short bullets."
@@ -80,10 +84,10 @@ The local server forwards the SDP to the OpenAI Realtime API with a session conf
   "type": "realtime",
   "model": "gpt-realtime-2",
   "tools": [
-    {
-      "type": "function",
-      "name": "ask_codex"
-    }
+    { "type": "function", "name": "get_codebase_overview" },
+    { "type": "function", "name": "search_codebase" },
+    { "type": "function", "name": "read_codebase_file" },
+    { "type": "function", "name": "ask_codex" }
   ]
 }
 ```
@@ -94,11 +98,64 @@ Voice speed defaults to Very Fast and is currently implemented as Realtime instr
 
 Voice previews use `POST /api/voice/preview`. The local server calls the OpenAI speech endpoint with `gpt-4o-mini-tts`, so the API key stays server-side.
 
-The voice is instructed not to say file names, paths, or line numbers aloud. Exact references stay in the visible Codex output.
+The voice is instructed not to say file names, paths, or line numbers aloud. Exact references can stay in visible text.
 
-After Codex finishes, the browser stores the full Codex answer in the transcript but sends Realtime only a compact `spoken_summary` from the `Short version` or `Short answer` paragraph. The voice says that summary or a close paraphrase.
+Normal codebase Q&A uses three fast local tools:
+
+```text
+get_codebase_overview
+search_codebase
+read_codebase_file
+```
+
+`get_codebase_overview` returns a bounded file tree and key README/package/config snippets. `search_codebase` returns exact string matches with file and line numbers. `read_codebase_file` returns a bounded numbered file excerpt.
+
+After Codex finishes, the browser stores the full Codex answer in the transcript but sends Realtime only a compact `spoken_summary` from the `Short version` or `Short answer` paragraph. The voice says that summary or a close paraphrase, then asks at most one short follow-up question.
+
+If Codex fails, the browser still returns a `function_call_output` to Realtime. That output includes an `error` field plus a short `spoken_summary`, so the voice can say the check failed instead of acting like the tool is still running.
+
+Codex prompts are still tuned for bounded interaction. Broad normal questions should not call Codex. Codex should stop once it has enough evidence for a useful deep answer instead of searching for completeness.
 
 Realtime cost is calculated from `response.done`. The app uses text, audio, image, cached input, and output token details when they are present. If a response does not include enough detail to price safely, the tokens are counted as unpriced.
+
+## Fast Tool Contract
+
+Tool names:
+
+```text
+get_codebase_overview
+search_codebase
+read_codebase_file
+```
+
+Search arguments:
+
+```json
+{
+  "query": "createRealtimeSession",
+  "max_results": 20
+}
+```
+
+Read arguments:
+
+```json
+{
+  "file_path": "server/realtime.ts",
+  "start_line": 150,
+  "line_count": 80
+}
+```
+
+The browser handles those tool calls by calling:
+
+```text
+POST /api/codebase/overview
+POST /api/codebase/search
+POST /api/codebase/read
+```
+
+The server resolves all paths under the validated target codebase and rejects outside files.
 
 ## Codex Tool Contract
 
@@ -130,6 +187,17 @@ Before returning the tool result to Realtime, the browser converts the backend r
 }
 ```
 
+Failure tool output:
+
+```json
+{
+  "conversation_id": "local-conversation-id",
+  "spoken_summary": "Codex could not complete that check. The error is visible in the transcript.",
+  "full_answer_visible_in_transcript": true,
+  "error": "Codex turn failed: Unsupported model"
+}
+```
+
 Backend result:
 
 ```json
@@ -158,7 +226,7 @@ The current app runs Codex in read-only investigation mode and tells it not to e
 
 The first Codex command uses `--sandbox read-only`.
 
-The Realtime model can trigger Codex investigation, but it cannot directly execute shell commands. It can only call the local `ask_codex` tool.
+The Realtime model can trigger local overview, search, read-file, and optional Codex investigation tools. It cannot directly execute shell commands.
 
 The server validates paths at the API boundary.
 
@@ -170,8 +238,8 @@ The first browser UI uses a path input instead of a native folder picker because
 
 Realtime voice requires `OPENAI_API_KEY` in the local server environment.
 
-Codex must already be installed and authenticated on the machine.
+Codex must already be installed and authenticated on the machine for deep investigations and quiz generation.
 
-Long Codex investigations can take time. The UI shows a running state while Codex runs, then displays the final model output.
+Deep Codex investigations can still take time when the user selects higher reasoning or asks for a full review. The default voice loop avoids Codex and uses bounded local file tools for faster answers.
 
 The cost panel is local UI state. It is meant to show the current browser session cost, not a historical billing report.

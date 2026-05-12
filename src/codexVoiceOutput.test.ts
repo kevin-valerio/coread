@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildCodexVoiceToolOutput, extractCodexSpokenSummary } from "./codexVoiceOutput";
+import {
+  buildCodexVoiceToolError,
+  buildCodexVoiceToolOutput,
+  extractCodexSpokenSummary
+} from "./codexVoiceOutput";
 
 describe("extractCodexSpokenSummary", () => {
   it("uses the short version paragraph and strips file references", () => {
@@ -50,5 +54,14 @@ describe("buildCodexVoiceToolOutput", () => {
       full_answer_visible_in_transcript: true
     });
     expect(JSON.stringify(output)).not.toContain("Full detailed answer");
+  });
+
+  it("builds a compact error payload for Realtime", () => {
+    expect(buildCodexVoiceToolError("Codex turn failed: Unsupported model", "conversation-1")).toEqual({
+      conversation_id: "conversation-1",
+      spoken_summary: "Codex could not complete that check. The error is visible in the transcript.",
+      full_answer_visible_in_transcript: true,
+      error: "Codex turn failed: Unsupported model"
+    });
   });
 });

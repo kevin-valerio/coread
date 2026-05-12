@@ -122,6 +122,17 @@ export function summarizeCodexJsonLine(line: string): string | undefined {
     return "Codex turn completed.";
   }
 
+  if (type === "error") {
+    const message = readErrorMessage(event.message);
+    return message ? `Codex error: ${message}` : "Codex error.";
+  }
+
+  if (type === "turn.failed") {
+    const error = event.error as Record<string, unknown> | undefined;
+    const message = readErrorMessage(error?.message);
+    return message ? `Codex turn failed: ${message}` : "Codex turn failed.";
+  }
+
   const payload = event.payload as Record<string, unknown> | undefined;
 
   if (type === "event_msg" && payload?.type === "task_complete") {
@@ -155,6 +166,51 @@ export function summarizeCodexJsonLine(line: string): string | undefined {
   }
 
   return type || undefined;
+}
+
+function readErrorMessage(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    const nested = findErrorMessageInJson(parsed);
+    return nested ?? value;
+  } catch {
+    return value;
+  }
+}
+
+function findErrorMessageInJson(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findErrorMessageInJson(item);
+      if (found) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  const object = value as Record<string, unknown>;
+  if (typeof object.message === "string" && object.message.trim()) {
+    return object.message;
+  }
+
+  for (const nested of Object.values(object)) {
+    const found = findErrorMessageInJson(nested);
+    if (found) {
+      return found;
+    }
+  }
+
+  return undefined;
 }
 
 export function extractCodexModelFromJsonLine(line: string): string | undefined {
@@ -288,7 +344,7 @@ async function loadOrCreateConversation(
 
     return {
       ...existing,
-      reasoningEffort: input.reasoningEffort ?? existing.reasoningEffort ?? "medium"
+      reasoningEffort: input.reasoningEffort ?? existing.reasoningEffort ?? "low"
     };
   }
 
@@ -361,7 +417,7 @@ async function runCodex(
 }
 
 function getReasoningEffort(value: CodexReasoningEffort | undefined): CodexReasoningEffort {
-  return value ?? "medium";
+  return value ?? "low";
 }
 
 function runProcess(

@@ -111,7 +111,7 @@ function readRealtimeSessionInput(req: Request): RealtimeSessionInput {
   const conversationId =
     readBodyString(body, "conversationId") ?? readHeader(req.headers["x-conversation-id"]) ?? "";
   const reasoningEffort =
-    readBodyString(body, "reasoningEffort") ?? readHeader(req.headers["x-codex-reasoning"]) ?? "medium";
+    readBodyString(body, "reasoningEffort") ?? readHeader(req.headers["x-codex-reasoning"]) ?? "low";
   const voiceSpeed = normalizeVoiceSpeed(
     readBodyString(body, "voiceSpeed") ?? readHeader(req.headers["x-voice-speed"])
   );
@@ -183,17 +183,23 @@ export function buildRealtimeSessionConfig(input: {
   const instructions = [
     "You are a live voice codebase Q&A assistant.",
     getVoiceSpeedInstruction(voiceSpeed),
+    "This is a fast interactive conversation, not a complete code review by default.",
     "Use simple English. Be concise and direct.",
     'Keep spoken filler short. Example: say "Let me check that", not "Let me check that quickly so I can give you the exact folder name."',
-    "For codebase-specific claims, call the ask_codex tool before answering.",
+    "For normal codebase questions, call get_codebase_overview, search_codebase, or read_codebase_file and answer directly from those tool results.",
+    "Do not call ask_codex for normal orientation, navigation, or small exact-behavior questions.",
+    "Only call ask_codex when the user explicitly asks for a deep pass, a bug hunt, a security review, or says to go deeper.",
+    "After calling any tool, wait for the tool output. Do not give extra still-running status messages.",
+    "Use one final assistant answer for each user turn.",
     "When ask_codex returns a spoken_summary field, say that summary or a close paraphrase.",
+    "If ask_codex returns an error field, say the check failed in one short sentence. Do not say it is still running.",
     "Do not read the full Codex answer aloud. The full answer is already visible in the transcript.",
-    "After saying the summary once, stop and wait for a new user question.",
+    "After saying the summary once, ask at most one short follow-up question, then stop and wait.",
     "When the app sends quiz instructions, ask the exact quiz question aloud. After the user answers, call grade_quiz_answer with the question id and the user's answer. Do not grade quiz answers yourself before that tool returns.",
     "After grade_quiz_answer returns, say the status and grade in simple English.",
     "Do not say file names, paths, or line numbers aloud.",
-    "Keep exact file and line references in the visible Codex output only.",
-	  "Sometimes you add unnecessary lines like ' If you want exact evidence, the references are in the transcript.'. We don't want that, this doesn't matter",
+    "Keep exact file and line references in visible text only.",
+    "Do not add lines like 'If you want exact evidence, the references are in the transcript.' unless the user asks.",
     "If the user asks where the evidence is, say that the exact references are in the transcript.",
     `Current target path: ${input.targetPath || "not selected"}`,
     `Current conversation id: ${input.conversationId || "not created yet"}`,
@@ -219,9 +225,67 @@ export function buildRealtimeSessionConfig(input: {
     tools: [
       {
         type: "function",
+        name: "get_codebase_overview",
+        description:
+          "Get a fast local overview of the selected codebase: bounded file tree plus key README/package/config snippets.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {},
+          required: []
+        }
+      },
+      {
+        type: "function",
+        name: "search_codebase",
+        description:
+          "Search the selected codebase for an exact string. Use this to find files, symbols, routes, or config names before answering.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            query: {
+              type: "string",
+              description: "The exact string to search for."
+            },
+            max_results: {
+              type: "number",
+              description: "Maximum matches to return. Defaults to 30."
+            }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        type: "function",
+        name: "read_codebase_file",
+        description:
+          "Read a bounded line window from a file in the selected codebase. Use paths returned by overview or search.",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            file_path: {
+              type: "string",
+              description: "Relative file path inside the selected codebase."
+            },
+            start_line: {
+              type: "number",
+              description: "First line to read. Defaults to 1."
+            },
+            line_count: {
+              type: "number",
+              description: "Number of lines to read. Defaults to 160."
+            }
+          },
+          required: ["file_path"]
+        }
+      },
+      {
+        type: "function",
         name: "ask_codex",
         description:
-          "Ask local Codex to inspect the selected codebase and answer a codebase question with file and line references.",
+          "Run a slower local Codex read-only investigation. Use only for explicit deep passes, bug hunts, security reviews, or go-deeper requests.",
         parameters: {
           type: "object",
           additionalProperties: false,

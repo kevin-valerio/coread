@@ -51,6 +51,24 @@ describe("summarizeCodexJsonLine", () => {
 
     expect(summarizeCodexJsonLine(line)).toBe("Codex task completed without a final answer.");
   });
+
+  it("summarizes nested Codex error messages", () => {
+    const message = JSON.stringify({
+      type: "error",
+      status: 400,
+      error: {
+        type: "invalid_request_error",
+        message: "Unsupported model"
+      }
+    });
+
+    expect(summarizeCodexJsonLine(JSON.stringify({ type: "error", message }))).toBe(
+      "Codex error: Unsupported model"
+    );
+    expect(
+      summarizeCodexJsonLine(JSON.stringify({ type: "turn.failed", error: { message } }))
+    ).toBe("Codex turn failed: Unsupported model");
+  });
 });
 
 describe("formatCodexExitError", () => {

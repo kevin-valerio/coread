@@ -7,6 +7,7 @@ import { createRealtimeSession } from "./realtime";
 import { createVoicePreview } from "./voicePreview";
 import { createConversation, listConversations } from "./store";
 import { resolveDirectory, resolveFileInsideDirectory } from "./pathUtils";
+import { getCodebaseOverview, readCodebaseFileExcerpt, searchCodebase } from "./codebaseContext";
 import {
   generateQuizQuestions,
   gradeQuizAnswer,
@@ -77,6 +78,42 @@ app.post("/api/codebase/file", async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "File could not be opened";
     res.status(400).json({ ok: false, error: message });
+  }
+});
+
+app.post("/api/codebase/overview", async (req, res, next) => {
+  try {
+    const result = await getCodebaseOverview(String(req.body?.targetPath ?? ""));
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/codebase/search", async (req, res, next) => {
+  try {
+    const result = await searchCodebase(
+      String(req.body?.targetPath ?? ""),
+      String(req.body?.query ?? ""),
+      typeof req.body?.maxResults === "number" ? req.body.maxResults : undefined
+    );
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/codebase/read", async (req, res, next) => {
+  try {
+    const result = await readCodebaseFileExcerpt(
+      String(req.body?.targetPath ?? ""),
+      String(req.body?.filePath ?? ""),
+      typeof req.body?.startLine === "number" ? req.body.startLine : undefined,
+      typeof req.body?.lineCount === "number" ? req.body.lineCount : undefined
+    );
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
   }
 });
 

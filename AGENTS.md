@@ -2,7 +2,9 @@
 
 The goal is to let a user pick a local codebase, ask questions by voice, and receive a real-time spoken answer plus a text transcript with file and line references.
 
-The first implementation uses `gpt-realtime-2` for the live voice session and `codex exec` as the local investigation worker. Follow-up turns must reuse the same Codex session with `codex exec resume` so the review stays contextual inside one topic conversation.
+The current implementation uses `gpt-realtime-2` for the live voice session. Normal codebase questions use fast local overview, search, and read-file tools so the Realtime model can answer directly. `codex exec` remains available for explicit deep passes, bug hunts, and security reviews.
+
+When Codex is used, follow-up turns must reuse the same Codex session with `codex exec resume` so the review stays contextual inside one topic conversation.
 
 ## Product Rules
 
@@ -13,6 +15,12 @@ Do not expose `OPENAI_API_KEY` to the browser. The browser sends WebRTC SDP to t
 The user selects a local folder in the UI. A browser cannot safely expose a real local folder path from a native picker, so the first app version accepts a folder path input and validates it on the local server.
 
 The user can choose Codex reasoning amount before asking a question. Pass this through to Codex as `model_reasoning_effort`.
+
+Default conversations should feel fluid and fast. For broad codebase questions, call the local overview tool and answer with the next useful thing, not a complete report. A good default answer explains the purpose, key entrypoints, and one useful follow-up question.
+
+Only do a deep Codex pass when the user asks for a broad exact-behavior trace, a bug hunt, a security review, or explicitly asks to go deeper. Even then, keep the spoken answer short and put detailed evidence in the transcript.
+
+Failed Codex checks must not look like they are still running. Return an explicit tool error to Realtime, say one short failure sentence aloud, and keep the detailed error in the transcript.
 
 The user can preview and choose Realtime voice, choose voice speed, and provide an extra voice system prompt. Voice speed is passed as Realtime instruction text.
 
@@ -42,7 +50,7 @@ open -na 'Google Chrome' --args --remote-debugging-address=127.0.0.1 --remote-de
 
 Make logs inspectable. When an agent calls another agent, keep enough local trace data to debug what happened without guessing.
 
-Keep tool boundaries explicit. Realtime talks to the browser and local backend. The backend executes Codex. Codex inspects the target codebase.
+Keep tool boundaries explicit. Realtime talks to the browser and local backend. The backend reads bounded local codebase context directly. Codex inspects the target codebase only for explicit deep work.
 
 Do not add speculative features. Build the smallest useful review loop first.
 
@@ -50,10 +58,12 @@ Do not add speculative features. Build the smallest useful review loop first.
 
 The browser opens a WebRTC session with `gpt-realtime-2`.
 
-The local server creates the Realtime session and registers an `ask_codex` tool.
+The local server creates the Realtime session and registers fast codebase tools plus the slower `ask_codex` tool.
 
-When the Realtime model needs codebase evidence, it calls `ask_codex`.
+When the Realtime model needs normal codebase evidence, it calls `get_codebase_overview`, `search_codebase`, or `read_codebase_file`.
 
-The browser receives that tool call over the Realtime data channel, calls the local `/api/codex/ask/stream` endpoint, then returns the final Codex output to the Realtime session as `function_call_output`.
+The browser receives those tool calls over the Realtime data channel, calls the local `/api/codebase/*` endpoints, then returns the result to the Realtime session as `function_call_output`.
+
+When the user asks for explicit deep work, Realtime can call `ask_codex`. The browser calls `/api/codex/ask/stream`, then returns the final Codex output to the Realtime session as `function_call_output`.
 
 The backend stores local conversation metadata under `.data/conversations.json`.

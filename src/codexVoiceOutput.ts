@@ -5,9 +5,10 @@ export interface CodexVoiceToolOutput {
   codex_session_id?: string;
   spoken_summary: string;
   full_answer_visible_in_transcript: true;
+  error?: string;
 }
 
-const maxSpokenSummaryLength = 700;
+const maxSpokenSummaryLength = 360;
 const shortSummaryPrefix =
   /^(?:#{1,6}\s*)?(?:[-*]\s*)?(?:\*\*)?\s*Short\s+(?:answer|version)\s*(?:\*\*)?\s*[:.-]?\s*/i;
 const likelyFileReference =
@@ -19,6 +20,15 @@ export function buildCodexVoiceToolOutput(result: CodexAnswer): CodexVoiceToolOu
     codex_session_id: result.codexSessionId,
     spoken_summary: extractCodexSpokenSummary(result.answer),
     full_answer_visible_in_transcript: true
+  };
+}
+
+export function buildCodexVoiceToolError(error: string, conversationId: string): CodexVoiceToolOutput {
+  return {
+    conversation_id: conversationId,
+    spoken_summary: "Codex could not complete that check. The error is visible in the transcript.",
+    full_answer_visible_in_transcript: true,
+    error
   };
 }
 

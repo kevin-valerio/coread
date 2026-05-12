@@ -53,7 +53,7 @@ export async function createConversation(input: {
     title: input.title?.trim() || "Codebase question",
     token: `rtcodex-${crypto.randomUUID()}`,
     targetPath: input.targetPath,
-    reasoningEffort: input.reasoningEffort ?? "medium",
+    reasoningEffort: input.reasoningEffort ?? "low",
     turns: 0,
     createdAt: now,
     updatedAt: now

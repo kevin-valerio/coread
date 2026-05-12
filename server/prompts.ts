@@ -1,5 +1,22 @@
 import type { ConversationRecord } from "./types";
 
+const fastInteractiveRules = [
+  "Fast interactive mode: answer the next useful thing, not a complete audit.",
+  "Inspect relevant files before making codebase claims.",
+  "Keep the investigation bounded. For broad questions, check only high-signal files like README/docs, package or project manifests, the top-level tree, and obvious entrypoints.",
+  "For narrow questions, inspect only the directly relevant files. Do not run broad searches unless the question needs it.",
+  "Stop once you have enough evidence for a useful answer. Do not keep searching for completeness.",
+  "Do not edit files. This is a read-only investigation.",
+  "Start with \"Short version:\" and one or two short sentences for voice playback. Do not include file names, paths, or line numbers in this paragraph.",
+  "Then include at most three detail bullets with file and line references for evidence.",
+  "If the question is broad or ambiguous, end with one short follow-up question instead of expanding the search.",
+  "If a deeper pass is needed, say what you checked and ask whether to go deeper."
+];
+
+function numberedRules(start: number, rules: string[]): string[] {
+  return rules.map((rule, index) => `${start + index}. ${rule}`);
+}
+
 export function buildFirstTurnPrompt(conversation: ConversationRecord, question: string): string {
   return [
     "You are the Codex investigation worker for a local voice codebase Q&A app.",
@@ -7,14 +24,7 @@ export function buildFirstTurnPrompt(conversation: ConversationRecord, question:
     `Target codebase: ${conversation.targetPath}`,
     "",
     "Rules:",
-    "1. Inspect relevant files before making claims.",
-    "2. Do not edit files. This is a read-only investigation.",
-    "3. Answer the user's question directly.",
-    "4. Include file and line references for evidence.",
-    "5. If the code does not show enough evidence, say what you checked.",
-    '6. Start with "Short version:" and one short paragraph that is useful for voice playback.',
-    "7. After that, include any needed details and file and line references.",
-    "8. Use simple English and keep the answer concise enough to be spoken by a voice assistant.",
+    ...numberedRules(1, fastInteractiveRules),
     "",
     "User question:",
     question
@@ -29,12 +39,7 @@ export function buildFollowUpPrompt(conversation: ConversationRecord, question: 
     "",
     "Rules:",
     "1. Use the previous context when it helps.",
-    "2. Inspect any newly relevant files before making claims.",
-    "3. Do not edit files. This is a read-only investigation.",
-    "4. Include file and line references for evidence.",
-    '5. Start with "Short version:" and one short paragraph that is useful for voice playback.',
-    "6. After that, include any needed details and file and line references.",
-    "7. Use simple English and keep the answer concise enough to be spoken by a voice assistant.",
+    ...numberedRules(2, fastInteractiveRules),
     "",
     "Follow-up question:",
     question
