@@ -357,6 +357,9 @@ export function buildRealtimeSessionConfig(input: {
     truncation: getTruncation(truncationMode),
     audio: {
       input: {
+        transcription: {
+          model: "gpt-4o-transcribe"
+        },
         turn_detection: getTurnDetection(turnDetectionMode)
       },
       output: {

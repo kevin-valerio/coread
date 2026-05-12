@@ -49,6 +49,9 @@ describe("buildRealtimeSessionConfig", () => {
     });
     expect(config.audio).toEqual({
       input: {
+        transcription: {
+          model: "gpt-4o-transcribe"
+        },
         turn_detection: {
           type: "semantic_vad",
           eagerness: "low",
@@ -88,6 +91,9 @@ describe("buildRealtimeSessionConfig", () => {
     expect(config.truncation).toBe("auto");
     expect(config.audio).toEqual({
       input: {
+        transcription: {
+          model: "gpt-4o-transcribe"
+        },
         turn_detection: {
           type: "semantic_vad",
           eagerness: "auto",

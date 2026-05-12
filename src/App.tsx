@@ -111,7 +111,7 @@ type ActiveTab = "review" | "quiz";
 type QuizDifficulty = "easy" | "medium" | "hard";
 type QuizQuestionStatus = "pending" | "asking" | "listening" | "grading" | "graded";
 type QuizGradeStatus = "correct" | "partial" | "incorrect";
-type AuditPresetId = "threat-model" | "user-input";
+type AuditPresetId = "threat-model" | "user-input" | "useful-skills";
 type AuditPresetStatus = "idle" | "loading" | "ready" | "error";
 
 const quizDifficultyOptions: Array<{ value: QuizDifficulty; label: string }> = [
@@ -128,7 +128,8 @@ const wholeCodebaseComponent: QuizComponent = {
 
 const auditPresetOptions: Array<{ id: AuditPresetId; label: string }> = [
   { id: "threat-model", label: "Threat model" },
-  { id: "user-input", label: "User input" }
+  { id: "user-input", label: "User input" },
+  { id: "useful-skills", label: "Useful skills" }
 ];
 
 const defaultVoiceSystemPrompt = [
@@ -203,6 +204,11 @@ interface AuditPresetResponse {
   usage?: CodexUsageRecord;
 }
 
+const emptyAuditPresetState: AuditPresetState = {
+  status: "idle",
+  markdown: ""
+};
+
 export function App() {
   const [targetPath, setTargetPath] = useState("~/Desktop");
   const [validatedPath, setValidatedPath] = useState("");
@@ -255,9 +261,10 @@ export function App() {
   const activeQuizQuestionIdRef = useRef<string | null>(null);
   const handledToolCallIdsRef = useRef<Set<string>>(new Set());
   const assistantDeltaSourceRef = useRef<string | null>(null);
+  const pendingUserTranscriptIdRef = useRef<string | null>(null);
   const validatedPathRef = useRef("");
   const auditPresetRunning = useMemo(
-    () => auditPresetOptions.some((preset) => auditPresetResults[preset.id].status === "loading"),
+    () => auditPresetOptions.some((preset) => auditPresetResults[preset.id]?.status === "loading"),
     [auditPresetResults]
   );
   const activity = useMemo<VoiceActivity>(() => {
@@ -334,6 +341,91 @@ export function App() {
     ]);
   }, []);
 
+  const beginUserTranscript = useCallback(() => {
+    if (pendingUserTranscriptIdRef.current) {
+      return;
+    }
+
+    const id = crypto.randomUUID();
+    pendingUserTranscriptIdRef.current = id;
+    setTranscript((items) => [
+      ...items,
+      {
+        id,
+        role: "user",
+        text: "Listening...",
+        createdAt: new Date().toLocaleTimeString(),
+        streaming: true
+      }
+    ]);
+  }, []);
+
+  const markUserTranscriptTranscribing = useCallback(() => {
+    const pendingId = pendingUserTranscriptIdRef.current;
+
+    if (!pendingId) {
+      return;
+    }
+
+    setTranscript((items) =>
+      items.map((item) => (item.id === pendingId ? { ...item, text: "Transcribing..." } : item))
+    );
+  }, []);
+
+  const finishUserTranscript = useCallback((text: string) => {
+    const pendingId = pendingUserTranscriptIdRef.current;
+    const transcriptText = text.trim();
+    pendingUserTranscriptIdRef.current = null;
+
+    setTranscript((items) => {
+      if (!pendingId) {
+        if (!transcriptText) {
+          return items;
+        }
+
+        return [
+          ...items,
+          {
+            id: crypto.randomUUID(),
+            role: "user",
+            text: transcriptText,
+            createdAt: new Date().toLocaleTimeString()
+          }
+        ];
+      }
+
+      const pendingIndex = items.findIndex((item) => item.id === pendingId);
+
+      if (pendingIndex === -1) {
+        if (!transcriptText) {
+          return items;
+        }
+
+        return [
+          ...items,
+          {
+            id: crypto.randomUUID(),
+            role: "user",
+            text: transcriptText,
+            createdAt: new Date().toLocaleTimeString()
+          }
+        ];
+      }
+
+      if (!transcriptText) {
+        return items.filter((item) => item.id !== pendingId);
+      }
+
+      const nextItems = [...items];
+      nextItems[pendingIndex] = {
+        ...nextItems[pendingIndex],
+        text: transcriptText,
+        streaming: false
+      };
+      return nextItems;
+    });
+  }, []);
+
   const stopVoicePreview = useCallback(() => {
     previewAudioRef.current?.pause();
     previewAudioRef.current = null;
@@ -397,6 +489,7 @@ export function App() {
 
   const clearTranscript = useCallback(() => {
     assistantDeltaSourceRef.current = null;
+    pendingUserTranscriptIdRef.current = null;
     setTranscript([]);
   }, []);
 
@@ -545,7 +638,10 @@ export function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ targetPath: targetCodebasePath, presetId })
         });
-        const payload = (await response.json()) as AuditPresetResponse;
+        const payload = await readJsonResponse<AuditPresetResponse>(
+          response,
+          "Audit preset could not be generated."
+        );
 
         if (!response.ok || !payload.ok || !payload.answer) {
           throw new Error(payload.error || "Audit preset could not be generated.");
@@ -641,7 +737,10 @@ export function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: requestedPath })
       });
-      const payload = (await response.json()) as { ok: boolean; targetPath?: string; error?: string };
+      const payload = await readJsonResponse<{ ok: boolean; targetPath?: string; error?: string }>(
+        response,
+        "Codebase path is invalid."
+      );
 
       if (!response.ok || !payload.ok || !payload.targetPath) {
         setValidatedPath("");
@@ -689,7 +788,14 @@ export function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ targetPath: activeTargetPath, reasoningEffort })
     });
-    const payload = (await response.json()) as { conversation: ConversationRecord };
+    if (!response.ok) {
+      throw new Error(await readResponseError(response));
+    }
+
+    const payload = await readJsonResponse<{ conversation: ConversationRecord }>(
+      response,
+      "Conversation could not be created."
+    );
     setConversation(payload.conversation);
     return payload.conversation;
   }
@@ -774,9 +880,9 @@ export function App() {
         throw new Error(await readResponseError(response));
       }
 
-      const payload = (await response.json()) as QuizCodexPayload & {
+      const payload = await readJsonResponse<QuizCodexPayload & {
         components: QuizComponent[];
-      };
+      }>(response, "Quiz components could not be generated.");
 
       recordQuizCodexResult(payload, activeConversation);
       setQuizComponents(payload.components);
@@ -827,9 +933,9 @@ export function App() {
         throw new Error(await readResponseError(response));
       }
 
-      const payload = (await response.json()) as QuizCodexPayload & {
+      const payload = await readJsonResponse<QuizCodexPayload & {
         questions: Array<Omit<QuizQuestion, "status">>;
-      };
+      }>(response, "Quiz questions could not be generated.");
 
       recordQuizCodexResult(payload, activeConversation);
       setQuizQuestions(payload.questions.map((question) => ({ ...question, status: "pending" })));
@@ -878,14 +984,14 @@ export function App() {
         throw new Error(await readResponseError(response));
       }
 
-      const payload = (await response.json()) as QuizCodexPayload & {
+      const payload = await readJsonResponse<QuizCodexPayload & {
         grade: {
           status: QuizGradeStatus;
           grade: number;
           markdown: string;
           spokenSummary: string;
         };
-      };
+      }>(response, "Quiz answer could not be graded.");
 
       recordQuizCodexResult(payload, activeConversation);
       updateQuizQuestion(questionId, {
@@ -997,12 +1103,12 @@ export function App() {
           throw new Error(await readResponseError(response));
         }
 
-        const payload = (await response.json()) as {
+        const payload = await readJsonResponse<{
           ok: true;
           filePath: string;
           relativePath: string;
           content: string;
-        };
+        }>(response, "File could not be opened.");
 
         setCodeViewer({
           requestedPath: reference.filePath,
@@ -1136,6 +1242,7 @@ export function App() {
     microphoneTracksRef.current = [];
     dataChannelRef.current = null;
     peerRef.current = null;
+    pendingUserTranscriptIdRef.current = null;
     setVoiceState("idle");
     setVoiceActivity("idle");
   }
@@ -1182,12 +1289,12 @@ export function App() {
 
     if (type === "conversation.item.input_audio_transcription.completed") {
       const transcriptText = String(event.transcript ?? "");
-      if (transcriptText) {
-        addTranscript("user", transcriptText);
+      finishUserTranscript(transcriptText);
+      if (transcriptText.trim()) {
         const questionId = activeQuizQuestionIdRef.current;
 
         if (questionId) {
-          updateQuizQuestion(questionId, { answer: transcriptText, status: "listening" });
+          updateQuizQuestion(questionId, { answer: transcriptText.trim(), status: "listening" });
         }
       }
       setVoiceActivity("thinking");
@@ -1196,6 +1303,8 @@ export function App() {
 
     if (type === "input_audio_buffer.speech_started") {
       const questionId = activeQuizQuestionIdRef.current;
+
+      beginUserTranscript();
 
       if (questionId) {
         updateQuizQuestion(questionId, { status: "listening" });
@@ -1206,6 +1315,7 @@ export function App() {
     }
 
     if (type === "input_audio_buffer.speech_stopped") {
+      markUserTranscriptTranscribing();
       setVoiceActivity("thinking");
       return;
     }
@@ -1935,7 +2045,7 @@ function AuditPresetDock({
     <div className={`audit-preset-dock ${openPreset ? "open" : ""}`}>
       <div className="audit-preset-rail" aria-label="Audit presets">
         {presets.map((preset) => {
-          const result = results[preset.id];
+          const result = results[preset.id] ?? emptyAuditPresetState;
 
           return (
             <button
@@ -2478,13 +2588,32 @@ function parseSseBlock(block: string): { event: string; data: string } | undefin
 
 async function readResponseError(response: Response): Promise<string> {
   const contentType = response.headers.get("content-type") ?? "";
+  const body = await response.text();
 
   if (contentType.includes("application/json")) {
-    const payload = (await response.json()) as { error?: string };
-    return payload.error || response.statusText;
+    try {
+      const payload = JSON.parse(body) as { error?: string };
+      return payload.error || response.statusText;
+    } catch {
+      return body.trim() || response.statusText;
+    }
   }
 
-  return (await response.text()) || response.statusText;
+  return body.trim() || response.statusText;
+}
+
+async function readJsonResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
+  const body = await response.text();
+
+  if (!body.trim()) {
+    throw new Error(`${fallbackMessage} Server returned an empty response.`);
+  }
+
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    throw new Error(`${fallbackMessage} Server returned invalid JSON.`);
+  }
 }
 
 async function postJson(url: string, body: unknown): Promise<unknown> {
@@ -2498,7 +2627,7 @@ async function postJson(url: string, body: unknown): Promise<unknown> {
     throw new Error(await readResponseError(response));
   }
 
-  return response.json();
+  return readJsonResponse(response, "Request failed.");
 }
 
 function readRealtimeErrorMessage(event: Record<string, unknown>): string {
@@ -2601,6 +2730,10 @@ function createEmptyAuditPresetResults(): Record<AuditPresetId, AuditPresetState
       markdown: ""
     },
     "user-input": {
+      status: "idle",
+      markdown: ""
+    },
+    "useful-skills": {
       status: "idle",
       markdown: ""
     }

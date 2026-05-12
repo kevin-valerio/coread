@@ -658,16 +658,21 @@ textarea:focus {
   line-height: 1.5;
 }
 
-.message.status .message-top {
+.message.status .message-top,
+.message.assistant .message-top {
   padding: 6px 8px;
   font-size: 10px;
 }
 
-.message.status .message-plain {
+.message.status .message-plain,
+.message.assistant .markdown-body {
   padding: 7px 8px;
-  font-family: inherit;
   font-size: 12px;
   line-height: 1.35;
+}
+
+.message.status .message-plain {
+  font-family: inherit;
 }
 
 .transcript-clear-button {

@@ -1,7 +1,7 @@
 import { askCodex } from "./codexBridge";
 import type { CodexAnswer } from "./types";
 
-export type AuditPresetId = "threat-model" | "user-input";
+export type AuditPresetId = "threat-model" | "user-input" | "useful-skills";
 
 interface AuditPreset {
   id: AuditPresetId;
@@ -51,11 +51,36 @@ const auditPresets: Record<AuditPresetId, AuditPreset> = {
       "",
       "Every concrete claim must include file and line references when possible. If evidence is missing, say that clearly."
     ].join("\n")
+  },
+  "useful-skills": {
+    id: "useful-skills",
+    title: "Useful skills",
+    question: [
+      "Rank the available skills that are useful for auditing this codebase.",
+      "",
+      "First, discover the skills that are visible to you through the Codex environment, local skill docs, or repo-local docs. Do not invent skill names. Do not execute or invoke any skill; only inspect metadata/docs and recommend what the user could choose next.",
+      "",
+      "Answer these questions:",
+      "1. Across all available skills, which are best for finding security bugs?",
+      "2. Which of those skills apply best to this specific codebase after inspecting its language, framework, architecture, and attacker-controlled surfaces?",
+      "",
+      "Output Markdown with these sections:",
+      "Short answer",
+      "Ranked useful skills",
+      "Best security-bug skills",
+      "Best fit for this codebase",
+      "How to use them here",
+      "Unknowns / needs more checking",
+      "",
+      "Sort the ranking with the best choice first. For each ranked skill, include the skill name, what it is good for, why it fits or does not fit this codebase, and a concrete example prompt the user could run next.",
+      "",
+      "Every concrete codebase-fit claim must include file and line references when possible. Every skill claim should cite the skill source when readable. If no skill inventory is visible, say that clearly and list only skill categories, not fake skill names."
+    ].join("\n")
   }
 };
 
 export function isAuditPresetId(value: unknown): value is AuditPresetId {
-  return value === "threat-model" || value === "user-input";
+  return value === "threat-model" || value === "user-input" || value === "useful-skills";
 }
 
 export async function runAuditPreset(targetPath: string, presetId: AuditPresetId): Promise<CodexAnswer> {
