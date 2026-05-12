@@ -153,7 +153,7 @@ After Codex finishes, the browser stores the full Codex answer in the transcript
 
 If Codex fails, the browser still returns a `function_call_output` to Realtime. That output includes an `error` field plus a short `spoken_summary`, so the voice can say the check failed instead of acting like the tool is still running.
 
-Codex prompts are still tuned for bounded interaction. Broad normal questions should not call Codex. Codex should stop once it has enough evidence for a useful deep answer instead of searching for completeness.
+Codex prompts are still tuned for bounded interaction. Broad normal questions should not call Codex. If a deeper pass may be useful, Realtime asks the user whether they want a deep Codex pass before calling `ask_codex`. Codex should stop once it has enough evidence for a useful deep answer instead of searching for completeness.
 
 Realtime cost is calculated from `response.done`. The app uses text, audio, image, cached input, and output token details when they are present. If a response does not include enough detail to price safely, the tokens are counted as unpriced.
 

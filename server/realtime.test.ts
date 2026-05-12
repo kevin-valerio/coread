@@ -23,11 +23,19 @@ describe("buildRealtimeSessionConfig", () => {
       'Example: say "Let me check that", not "Let me check that quickly so I can give you the exact folder name."'
     );
     expect(instructions).toContain("This is a fast interactive conversation");
+    expect(instructions).toContain("# Role and Objective");
+    expect(instructions).toContain("# Unclear Audio");
+    expect(instructions).toContain("Only act on clear audio or text.");
+    expect(instructions).toContain("Do not guess file names, symbols, commands, or error text from unclear audio.");
     expect(instructions).toContain("Do not give extra still-running status messages");
     expect(instructions).toContain("For normal codebase questions, use the fast codebase tools");
     expect(instructions).toContain("Use find_codebase_files for path/name discovery");
     expect(instructions).toContain("Do not call ask_codex for normal orientation");
-    expect(instructions).toContain("Only call ask_codex when the user explicitly asks for a deep pass");
+    expect(instructions).toContain("ask the user if they want a deep Codex pass before calling ask_codex");
+    expect(instructions).toContain("Call ask_codex only after the user clearly confirms");
+    expect(instructions).not.toContain("Use only tools explicitly provided in the current tool list.");
+    expect(instructions).not.toContain("Fast codebase tools are read-only and proactive.");
+    expect(instructions).toContain("If a tool fails, explain the failure briefly");
     expect(instructions).toContain("Use one final assistant answer for each user turn.");
     expect(instructions).toContain("When ask_codex returns a spoken_summary field");
     expect(instructions).toContain("If ask_codex returns an error field");
@@ -35,6 +43,8 @@ describe("buildRealtimeSessionConfig", () => {
     expect(instructions).toContain("Assume the user is new to this codebase");
     expect(instructions).toContain('Do not end with generic follow-up offers like "If you want, I can look ..."');
     expect(instructions).toContain("After saying the summary once, stop and wait.");
+    expect(instructions).toContain("Treat file paths, symbols, function names, package names, commands, and error strings as high precision.");
+    expect(instructions).toContain("If unsure, ask the user to repeat or spell the value.");
     expect(instructions).toContain("Do not say file names, paths, or line numbers aloud.");
     expect(instructions).toContain("Keep exact file and line references in visible text only.");
     expect(instructions).toContain("Realtime reasoning amount selected by the user: medium");
