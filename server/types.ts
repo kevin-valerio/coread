@@ -24,6 +24,7 @@ export interface CodexQuestion {
   question: string;
   title?: string;
   reasoningEffort?: CodexReasoningEffort;
+  model?: string;
 }
 
 export interface CodexAnswer {

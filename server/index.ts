@@ -3,6 +3,7 @@ import express from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { askCodex } from "./codexBridge";
+import { isAuditPresetId, runAuditPreset } from "./auditPresets";
 import { createRealtimeSession } from "./realtime";
 import { createVoicePreview } from "./voicePreview";
 import { createConversation, listConversations } from "./store";
@@ -255,6 +256,23 @@ app.post("/api/quiz/grade", async (req, res, next) => {
     });
 
     res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/audit/preset", async (req, res, next) => {
+  try {
+    const targetPath = String(req.body?.targetPath ?? "");
+    const presetId = req.body?.presetId;
+
+    if (!isAuditPresetId(presetId)) {
+      res.status(400).json({ ok: false, error: "Unknown audit preset." });
+      return;
+    }
+
+    const result = await runAuditPreset(targetPath, presetId);
+    res.json({ ok: true, presetId, ...result });
   } catch (error) {
     next(error);
   }

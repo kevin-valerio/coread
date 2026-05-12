@@ -310,7 +310,7 @@ export async function askCodex(
     : buildFollowUpPrompt(conversation, input.question);
 
   const startedAt = Date.now();
-  const run = await runCodex(conversation, prompt, isFirstTurn, onProgress);
+  const run = await runCodex(conversation, prompt, isFirstTurn, input.model, onProgress);
   const detectedSessionId =
     conversation.codexSessionId ??
     extractSessionIdFromText(run.stdout) ??
@@ -359,12 +359,14 @@ async function runCodex(
   conversation: ConversationRecord,
   prompt: string,
   isFirstTurn: boolean,
+  model: string | undefined,
   onProgress?: CodexProgressHandler
 ): Promise<CodexRunResult> {
   const outputDir = path.resolve(".data", "codex-output");
   await fs.mkdir(outputDir, { recursive: true });
   const outputFile = path.join(outputDir, `${conversation.id}-${Date.now()}.md`);
   const reasoningConfig = `model_reasoning_effort="${getReasoningEffort(conversation.reasoningEffort)}"`;
+  const modelArgs = model?.trim() ? ["-m", model.trim()] : [];
   const args = isFirstTurn
     ? [
         "exec",
@@ -372,6 +374,7 @@ async function runCodex(
         "--skip-git-repo-check",
         "--sandbox",
         "read-only",
+        ...modelArgs,
         "-c",
         reasoningConfig,
         "-C",
@@ -386,6 +389,7 @@ async function runCodex(
         conversation.codexSessionId ?? "",
         "--json",
         "--skip-git-repo-check",
+        ...modelArgs,
         "-c",
         'sandbox_mode="read-only"',
         "-c",
