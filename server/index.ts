@@ -267,7 +267,8 @@ app.post("/api/quiz/components", async (req, res, next) => {
       conversationId:
         typeof req.body?.conversationId === "string" ? req.body.conversationId : undefined,
       targetPath,
-      reasoningEffort: parseReasoningEffort(req.body?.reasoningEffort)
+      reasoningEffort: parseReasoningEffort(req.body?.reasoningEffort),
+      model: parseModel(req.body?.model)
     });
 
     res.json({ ok: true, ...result });
@@ -293,7 +294,8 @@ app.post("/api/quiz/questions", async (req, res, next) => {
       component,
       difficulty: normalizeQuizDifficulty(req.body?.difficulty),
       count: normalizeQuestionCount(req.body?.count),
-      reasoningEffort: parseReasoningEffort(req.body?.reasoningEffort)
+      reasoningEffort: parseReasoningEffort(req.body?.reasoningEffort),
+      model: parseModel(req.body?.model)
     });
 
     res.json({ ok: true, ...result });
@@ -318,7 +320,8 @@ app.post("/api/quiz/grade", async (req, res, next) => {
       targetPath,
       question,
       answer: String(req.body?.answer ?? ""),
-      reasoningEffort: parseReasoningEffort(req.body?.reasoningEffort)
+      reasoningEffort: parseReasoningEffort(req.body?.reasoningEffort),
+      model: parseModel(req.body?.model)
     });
 
     res.json({ ok: true, ...result });
@@ -352,7 +355,8 @@ app.post("/api/codex/ask", async (req, res, next) => {
       targetPath: String(req.body?.targetPath ?? ""),
       question: String(req.body?.question ?? ""),
       title: typeof req.body?.title === "string" ? req.body.title : undefined,
-      reasoningEffort: parseReasoningEffort(req.body?.reasoningEffort)
+      reasoningEffort: parseReasoningEffort(req.body?.reasoningEffort),
+      model: parseModel(req.body?.model)
     });
 
     res.json(result);
@@ -380,7 +384,8 @@ app.post("/api/codex/ask/stream", async (req, res) => {
         targetPath: String(req.body?.targetPath ?? ""),
         question: String(req.body?.question ?? ""),
         title: typeof req.body?.title === "string" ? req.body.title : undefined,
-        reasoningEffort: parseReasoningEffort(req.body?.reasoningEffort)
+        reasoningEffort: parseReasoningEffort(req.body?.reasoningEffort),
+        model: parseModel(req.body?.model)
       },
       (event) => send("progress", event)
     );
@@ -403,6 +408,10 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 app.listen(port, "127.0.0.1", () => {
   console.log(`coread server listening on http://127.0.0.1:${port}`);
 });
+
+function parseModel(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
 
 function parseReasoningEffort(value: unknown): CodexReasoningEffort | undefined {
   if (

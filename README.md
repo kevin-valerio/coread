@@ -7,6 +7,7 @@ Local voice app for asking questions about a codebase using OpenAI Realtime mode
 | Codebase vocal interaction | Ask codebase questions by voice. Get answers in real time |
 | Audit presets | Generates a Threat model, User input, and Useful skills audit notes. |
 | Quiz | Generate codebase questions, answer by voice, and get graded feedback. |
+| Model pickers | Choose the Codex model and the audio (realtime) model from the settings panel. |
 
 ## Run
 

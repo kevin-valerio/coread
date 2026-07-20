@@ -73,15 +73,31 @@ export interface CostSummary {
 }
 
 export const pricingMetadata = {
-  checkedAt: "2026-05-11",
+  checkedAt: "2026-07-20",
   sources: [
     "https://openai.com/api/pricing/",
-    "https://developers.openai.com/api/docs/models/gpt-realtime-2",
-    "https://developers.openai.com/api/docs/models/gpt-5.3-codex"
+    "https://developers.openai.com/api/docs/models/gpt-realtime-2.1",
+    "https://developers.openai.com/api/docs/models/gpt-realtime-2.1-mini",
+    "https://developers.openai.com/api/docs/models/gpt-5.6-terra"
   ]
 };
 
 const textModelPrices: Record<string, TokenPrice> = {
+  "gpt-5.6-sol": {
+    inputUsdPerMillion: 5,
+    cachedInputUsdPerMillion: 0.5,
+    outputUsdPerMillion: 30
+  },
+  "gpt-5.6-terra": {
+    inputUsdPerMillion: 2.5,
+    cachedInputUsdPerMillion: 0.25,
+    outputUsdPerMillion: 15
+  },
+  "gpt-5.6-luna": {
+    inputUsdPerMillion: 1,
+    cachedInputUsdPerMillion: 0.1,
+    outputUsdPerMillion: 6
+  },
   "gpt-5.5": {
     inputUsdPerMillion: 5,
     cachedInputUsdPerMillion: 0.5,
@@ -147,37 +163,69 @@ const textModelPrices: Record<string, TokenPrice> = {
   }
 };
 
-const realtimeTextPrice: TokenPrice = {
-  inputUsdPerMillion: 4,
-  cachedInputUsdPerMillion: 0.4,
-  outputUsdPerMillion: 24
+interface RealtimeModelPrice {
+  text: TokenPrice;
+  audio: TokenPrice;
+  image: {
+    inputUsdPerMillion: number;
+    cachedInputUsdPerMillion: number;
+  };
+}
+
+const realtimeStandardPrice: RealtimeModelPrice = {
+  text: {
+    inputUsdPerMillion: 4,
+    cachedInputUsdPerMillion: 0.4,
+    outputUsdPerMillion: 24
+  },
+  audio: {
+    inputUsdPerMillion: 32,
+    cachedInputUsdPerMillion: 0.4,
+    outputUsdPerMillion: 64
+  },
+  image: {
+    inputUsdPerMillion: 5,
+    cachedInputUsdPerMillion: 0.5
+  }
 };
 
-const realtimeAudioPrice: TokenPrice = {
-  inputUsdPerMillion: 32,
-  cachedInputUsdPerMillion: 0.4,
-  outputUsdPerMillion: 64
-};
-
-const realtimeImagePrice = {
-  inputUsdPerMillion: 5,
-  cachedInputUsdPerMillion: 0.5
+const realtimeModelPrices: Record<string, RealtimeModelPrice> = {
+  "gpt-realtime-2.1": realtimeStandardPrice,
+  "gpt-realtime-2": realtimeStandardPrice,
+  "gpt-realtime-2.1-mini": {
+    text: {
+      inputUsdPerMillion: 0.6,
+      cachedInputUsdPerMillion: 0.06,
+      outputUsdPerMillion: 2.4
+    },
+    audio: {
+      inputUsdPerMillion: 10,
+      cachedInputUsdPerMillion: 0.3,
+      outputUsdPerMillion: 20
+    },
+    image: {
+      inputUsdPerMillion: 0.8,
+      cachedInputUsdPerMillion: 0.08
+    }
+  }
 };
 
 export function calculateRealtimeCost(usage: RealtimeUsageRecord): CostCalculation {
-  if (usage.model !== "gpt-realtime-2") {
+  const price = realtimeModelPrices[usage.model];
+
+  if (!price) {
     return unpricedCalculation(usage.source, usage.model, "Realtime response", usage.totalTokens);
   }
 
   const lineItems: CostLineItem[] = [];
-  addInputLine(lineItems, "Realtime text input", usage.textInputTokens, usage.cachedTextInputTokens, realtimeTextPrice);
-  addInputLine(lineItems, "Realtime audio input", usage.audioInputTokens, usage.cachedAudioInputTokens, realtimeAudioPrice);
+  addInputLine(lineItems, "Realtime text input", usage.textInputTokens, usage.cachedTextInputTokens, price.text);
+  addInputLine(lineItems, "Realtime audio input", usage.audioInputTokens, usage.cachedAudioInputTokens, price.audio);
   addInputLine(lineItems, "Realtime image input", usage.imageInputTokens, usage.cachedImageInputTokens, {
-    ...realtimeImagePrice,
+    ...price.image,
     outputUsdPerMillion: 0
   });
-  addOutputLine(lineItems, "Realtime text output", usage.textOutputTokens, realtimeTextPrice);
-  addOutputLine(lineItems, "Realtime audio output", usage.audioOutputTokens, realtimeAudioPrice);
+  addOutputLine(lineItems, "Realtime text output", usage.textOutputTokens, price.text);
+  addOutputLine(lineItems, "Realtime audio output", usage.audioOutputTokens, price.audio);
 
   return buildCalculation({
     source: usage.source,
@@ -241,7 +289,10 @@ export function summarizeCostEntries(entries: CostEntry[]): CostSummary {
   );
 }
 
-export function extractRealtimeUsageFromEvent(event: Record<string, unknown>): RealtimeUsageRecord | undefined {
+export function extractRealtimeUsageFromEvent(
+  event: Record<string, unknown>,
+  fallbackModel = "gpt-realtime-2.1"
+): RealtimeUsageRecord | undefined {
   if (event.type !== "response.done") {
     return undefined;
   }
@@ -259,7 +310,7 @@ export function extractRealtimeUsageFromEvent(event: Record<string, unknown>): R
   if (!inputDetails || !outputDetails) {
     return {
       source: "realtime",
-      model: readString(response.model) || "gpt-realtime-2",
+      model: readString(response.model) || fallbackModel,
       textInputTokens: 0,
       cachedTextInputTokens: 0,
       audioInputTokens: 0,
@@ -276,7 +327,7 @@ export function extractRealtimeUsageFromEvent(event: Record<string, unknown>): R
 
   return {
     source: "realtime",
-    model: readString(response.model) || "gpt-realtime-2",
+    model: readString(response.model) || fallbackModel,
     textInputTokens: readNumber(inputDetails.text_tokens),
     cachedTextInputTokens: readNumber(cachedDetails?.text_tokens),
     audioInputTokens: readNumber(inputDetails.audio_tokens),

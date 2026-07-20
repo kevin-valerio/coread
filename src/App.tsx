@@ -65,6 +65,21 @@ type TurnDetectionMode =
   | "server-balanced"
   | "server-fast";
 type RealtimeTruncationMode = "auto" | "cost" | "short" | "disabled";
+type CodexModel = "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" | "gpt-5.5";
+type RealtimeModel = "gpt-realtime-2.1" | "gpt-realtime-2.1-mini" | "gpt-realtime-2";
+
+const codexModelOptions: Array<{ value: CodexModel; label: string }> = [
+  { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+  { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+  { value: "gpt-5.5", label: "GPT-5.5" }
+];
+
+const realtimeModelOptions: Array<{ value: RealtimeModel; label: string }> = [
+  { value: "gpt-realtime-2.1", label: "GPT Realtime 2.1" },
+  { value: "gpt-realtime-2.1-mini", label: "GPT Realtime 2.1 Mini" },
+  { value: "gpt-realtime-2", label: "GPT Realtime 2" }
+];
 
 const voiceOptions: Array<{ value: RealtimeVoice; label: string }> = [
   { value: "marin", label: "Marin" },
@@ -211,6 +226,8 @@ interface UiSettings {
   activeTab: ActiveTab;
   reasoningEffort: CodexReasoningEffort;
   realtimeReasoningEffort: RealtimeReasoningEffort;
+  codexModel: CodexModel;
+  realtimeModel: RealtimeModel;
   voice: RealtimeVoice;
   voiceSpeed: VoiceSpeed;
   turnDetectionMode: TurnDetectionMode;
@@ -230,6 +247,8 @@ const defaultUiSettings: UiSettings = {
   activeTab: "review",
   reasoningEffort: "low",
   realtimeReasoningEffort: "medium",
+  codexModel: "gpt-5.6-terra",
+  realtimeModel: "gpt-realtime-2.1",
   voice: "marin",
   voiceSpeed: "very-fast",
   turnDetectionMode: "semantic-auto",
@@ -249,6 +268,8 @@ export function App() {
   );
   const [realtimeReasoningEffort, setRealtimeReasoningEffort] =
     useState<RealtimeReasoningEffort>(defaultUiSettings.realtimeReasoningEffort);
+  const [codexModel, setCodexModel] = useState<CodexModel>(defaultUiSettings.codexModel);
+  const [realtimeModel, setRealtimeModel] = useState<RealtimeModel>(defaultUiSettings.realtimeModel);
   const [voice, setVoice] = useState<RealtimeVoice>(defaultUiSettings.voice);
   const [voiceSpeed, setVoiceSpeed] = useState<VoiceSpeed>(defaultUiSettings.voiceSpeed);
   const [turnDetectionMode, setTurnDetectionMode] = useState<TurnDetectionMode>(
@@ -346,6 +367,8 @@ export function App() {
       activeTab,
       reasoningEffort,
       realtimeReasoningEffort,
+      codexModel,
+      realtimeModel,
       voice,
       voiceSpeed,
       turnDetectionMode,
@@ -356,9 +379,11 @@ export function App() {
     }),
     [
       activeTab,
+      codexModel,
       darkMode,
       quizDifficulty,
       quizQuestionCount,
+      realtimeModel,
       reasoningEffort,
       realtimeReasoningEffort,
       targetPath,
@@ -457,6 +482,8 @@ export function App() {
         setActiveTab(storedSettings.activeTab);
         setReasoningEffort(storedSettings.reasoningEffort);
         setRealtimeReasoningEffort(storedSettings.realtimeReasoningEffort);
+        setCodexModel(storedSettings.codexModel);
+        setRealtimeModel(storedSettings.realtimeModel);
         setVoice(storedSettings.voice);
         setVoiceSpeed(storedSettings.voiceSpeed);
         setTurnDetectionMode(storedSettings.turnDetectionMode);
@@ -1195,7 +1222,8 @@ export function App() {
           conversationId: activeConversation.id,
           targetPath: activeTargetPath,
           question: text,
-          reasoningEffort
+          reasoningEffort,
+          model: codexModel
         })
       });
 
@@ -1255,7 +1283,8 @@ export function App() {
         body: JSON.stringify({
           conversationId: activeConversation.id,
           targetPath: validatedPath,
-          reasoningEffort
+          reasoningEffort,
+          model: codexModel
         })
       });
 
@@ -1309,7 +1338,8 @@ export function App() {
           component,
           difficulty: quizDifficulty,
           count: quizQuestionCount,
-          reasoningEffort
+          reasoningEffort,
+          model: codexModel
         })
       });
 
@@ -1360,7 +1390,8 @@ export function App() {
           targetPath: activeConversation.targetPath,
           question,
           answer,
-          reasoningEffort
+          reasoningEffort,
+          model: codexModel
         })
       });
 
@@ -1585,6 +1616,7 @@ export function App() {
           conversationId: activeConversation.id,
           reasoningEffort,
           realtimeReasoningEffort,
+          realtimeModel,
           voice,
           voiceSpeed,
           turnDetectionMode,
@@ -1756,7 +1788,7 @@ export function App() {
         addTranscript("error", responseDetails);
       }
 
-      const usage = extractRealtimeUsageFromEvent(event);
+      const usage = extractRealtimeUsageFromEvent(event, realtimeModel);
 
       if (usage) {
         addCostCalculation(calculateRealtimeCost(usage));
@@ -2142,6 +2174,25 @@ export function App() {
             </label>
 
             <label className="field">
+              <span>Audio model</span>
+              <select
+                name="realtimeModel"
+                value={realtimeModel}
+                onChange={(event) => {
+                  const nextRealtimeModel = event.target.value as RealtimeModel;
+                  updatePendingUiSettings({ realtimeModel: nextRealtimeModel });
+                  setRealtimeModel(nextRealtimeModel);
+                }}
+              >
+                {realtimeModelOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
               <span>Codex reason</span>
               <select
                 name="reasoningEffort"
@@ -2153,6 +2204,25 @@ export function App() {
                 }}
               >
                 {reasoningOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Codex model</span>
+              <select
+                name="codexModel"
+                value={codexModel}
+                onChange={(event) => {
+                  const nextCodexModel = event.target.value as CodexModel;
+                  updatePendingUiSettings({ codexModel: nextCodexModel });
+                  setCodexModel(nextCodexModel);
+                }}
+              >
+                {codexModelOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -3197,6 +3267,10 @@ function normalizeUiSettings(value: unknown): UiSettings {
     realtimeReasoningEffort: isReasoningEffort(object.realtimeReasoningEffort)
       ? object.realtimeReasoningEffort
       : defaultUiSettings.realtimeReasoningEffort,
+    codexModel: isCodexModel(object.codexModel) ? object.codexModel : defaultUiSettings.codexModel,
+    realtimeModel: isRealtimeModel(object.realtimeModel)
+      ? object.realtimeModel
+      : defaultUiSettings.realtimeModel,
     voice: isRealtimeVoice(object.voice) ? object.voice : defaultUiSettings.voice,
     voiceSpeed: isVoiceSpeed(object.voiceSpeed) ? object.voiceSpeed : defaultUiSettings.voiceSpeed,
     turnDetectionMode: isTurnDetectionMode(object.turnDetectionMode)
@@ -3228,6 +3302,14 @@ function isReasoningEffort(value: unknown): value is CodexReasoningEffort {
     value === "high" ||
     value === "xhigh"
   );
+}
+
+function isCodexModel(value: unknown): value is CodexModel {
+  return codexModelOptions.some((option) => option.value === value);
+}
+
+function isRealtimeModel(value: unknown): value is RealtimeModel {
+  return realtimeModelOptions.some((option) => option.value === value);
 }
 
 function isRealtimeVoice(value: unknown): value is RealtimeVoice {

@@ -32,6 +32,7 @@ interface QuizCodexInput {
   conversationId?: string;
   targetPath: string;
   reasoningEffort?: CodexReasoningEffort;
+  model?: string;
 }
 
 interface QuizCodexResult {
@@ -48,6 +49,7 @@ export async function proposeQuizComponents(
     targetPath: input.targetPath,
     title: "Quiz components",
     reasoningEffort: input.reasoningEffort,
+    model: input.model,
     question: buildComponentsPrompt()
   });
 
@@ -69,6 +71,7 @@ export async function generateQuizQuestions(input: QuizCodexInput & {
     targetPath: input.targetPath,
     title: "Quiz questions",
     reasoningEffort: input.reasoningEffort,
+    model: input.model,
     question: buildQuestionsPrompt(input.component, input.difficulty, input.count)
   });
 
@@ -89,6 +92,7 @@ export async function gradeQuizAnswer(input: QuizCodexInput & {
     targetPath: input.targetPath,
     title: "Quiz grading",
     reasoningEffort: input.reasoningEffort,
+    model: input.model,
     question: buildGradingPrompt(input.question, input.answer)
   });
 

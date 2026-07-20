@@ -29,6 +29,7 @@ interface RealtimeSessionInput {
   conversationId: string;
   reasoningEffort: string;
   realtimeReasoningEffort: RealtimeReasoningEffort;
+  realtimeModel: string;
   voice: RealtimeVoice;
   voiceSpeed: VoiceSpeed;
   turnDetectionMode: TurnDetectionMode;
@@ -36,8 +37,16 @@ interface RealtimeSessionInput {
   voiceSystemPrompt: string;
 }
 
-function getRealtimeModel(): string {
-  return process.env.REALTIME_MODEL || "gpt-realtime-2";
+function normalizeRealtimeModel(value: string | undefined): string | undefined {
+  if (value === "gpt-realtime-2.1" || value === "gpt-realtime-2.1-mini" || value === "gpt-realtime-2") {
+    return value;
+  }
+
+  return undefined;
+}
+
+function getRealtimeModel(value?: string): string {
+  return normalizeRealtimeModel(value) ?? (process.env.REALTIME_MODEL || "gpt-realtime-2");
 }
 
 function getSafetyIdentifier(): string {
@@ -228,6 +237,9 @@ function readRealtimeSessionInput(req: Request): RealtimeSessionInput {
       readHeader(req.headers["x-realtime-reasoning"]) ??
       process.env.REALTIME_REASONING_EFFORT
   );
+  const realtimeModel = getRealtimeModel(
+    readBodyString(body, "realtimeModel") ?? readHeader(req.headers["x-realtime-model"])
+  );
   const voiceSpeed = normalizeVoiceSpeed(
     readBodyString(body, "voiceSpeed") ?? readHeader(req.headers["x-voice-speed"])
   );
@@ -247,6 +259,7 @@ function readRealtimeSessionInput(req: Request): RealtimeSessionInput {
     conversationId,
     reasoningEffort,
     realtimeReasoningEffort,
+    realtimeModel,
     voice,
     voiceSpeed,
     turnDetectionMode,
@@ -299,6 +312,7 @@ export function buildRealtimeSessionConfig(input: {
   conversationId: string;
   reasoningEffort: string;
   realtimeReasoningEffort?: string;
+  realtimeModel?: string;
   voice?: string;
   voiceSpeed?: string;
   turnDetectionMode?: string;
@@ -372,7 +386,7 @@ export function buildRealtimeSessionConfig(input: {
 
   return {
     type: "realtime",
-    model: getRealtimeModel(),
+    model: getRealtimeModel(input.realtimeModel),
     instructions: instructions.join("\n"),
     reasoning: {
       effort: realtimeReasoningEffort
